@@ -5,12 +5,22 @@ import "prismjs/components/prism-python";
 import "prismjs/components/prism-r";
 import "prismjs/components/prism-markup";
 import "prismjs/components/prism-css";
+import "prismjs/components/prism-c";
+import "prismjs/components/prism-cpp";
+import "prismjs/components/prism-java";
 import "prismjs/components/prism-csharp";
 import "prismjs/components/prism-fortran";
 import "prismjs/components/prism-matlab";
 import type { TextRun, TextStyle } from "../lib/types";
 
-export const CODE_LANGUAGES = ["matlab", "python", "r", "javascript", "html", "css", "csharp", "fortran"];
+export const CODE_LANGUAGES = ["matlab", "python", "r", "javascript", "html", "css", "c", "cpp", "java", "csharp", "fortran"];
+
+export const CODE_LANGUAGE_LABELS: Record<string, string> = {
+  c: "C",
+  cpp: "C++",
+  java: "Java",
+  csharp: "C#",
+};
 
 const languageAliases: Record<string, string> = {
   js: "javascript",
@@ -19,6 +29,11 @@ const languageAliases: Record<string, string> = {
   csharp: "csharp",
   "c#": "csharp",
   cs: "csharp",
+  "c++": "cpp",
+  cc: "cpp",
+  cxx: "cpp",
+  hpp: "cpp",
+  h: "c",
   py: "python",
   m: "matlab",
   f90: "fortran",

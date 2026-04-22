@@ -11,6 +11,12 @@ describe("getCodeHighlightRuns", () => {
     expect(tokenTypes.has("comment")).toBe(true);
     expect(runs.some((run) => run.start >= 0 && run.length > 0 && run.style.color)).toBe(true);
   });
+
+  it("supports C, C++, and Java aliases", () => {
+    expect(getCodeHighlightRuns("int main() { return 0; }", "c", true).length).toBeGreaterThan(0);
+    expect(getCodeHighlightRuns("#include <vector>\nclass A {};", "c++", true).length).toBeGreaterThan(0);
+    expect(getCodeHighlightRuns("public class A { static void main(String[] args) {} }", "java", true).length).toBeGreaterThan(0);
+  });
 });
 
 describe("getCodeBlockStyle", () => {

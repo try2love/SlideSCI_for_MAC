@@ -1,5 +1,5 @@
 import { marked } from "marked";
-import type { TextRun, TextStyle } from "../lib/types";
+import type { NativeEquationRun, TextRun, TextStyle } from "../lib/types";
 
 export type MarkdownSegment =
   | { kind: "text"; content: string }
@@ -20,6 +20,7 @@ export type MarkdownRichBlock =
       kind: "richText";
       text: string;
       runs: TextRun[];
+      equations?: NativeEquationRun[];
       style: TextStyle;
       role: "heading" | "paragraph" | "list" | "orderedList" | "taskList" | "quote";
     }
@@ -233,7 +234,7 @@ function mergeStyle(base: TextStyle, extra: TextStyle): TextStyle {
   return { ...base, ...extra };
 }
 
-function appendStyledText(output: { text: string; runs: TextRun[] }, text: string, style: TextStyle): void {
+function appendStyledText(output: { text: string; runs: TextRun[]; equations: NativeEquationRun[] }, text: string, style: TextStyle): void {
   const start = output.text.length;
   output.text += text;
   if (text.length > 0 && Object.keys(style).length > 0) {
@@ -273,8 +274,8 @@ function inlineMathMatch(input: string): RegExpMatchArray | null {
   return match;
 }
 
-export function parseInlineMarkdown(input: string, inheritedStyle: TextStyle = {}): { text: string; runs: TextRun[] } {
-  const output = { text: "", runs: [] as TextRun[] };
+export function parseInlineMarkdown(input: string, inheritedStyle: TextStyle = {}): { text: string; runs: TextRun[]; equations: NativeEquationRun[] } {
+  const output = { text: "", runs: [] as TextRun[], equations: [] as NativeEquationRun[] };
   let remaining = input;
 
   while (remaining.length > 0) {
@@ -283,7 +284,10 @@ export function parseInlineMarkdown(input: string, inheritedStyle: TextStyle = {
     if (mathMatch?.index !== undefined && (!found || mathMatch.index < found.index)) {
       const before = remaining.slice(0, mathMatch.index);
       appendStyledText(output, before, inheritedStyle);
-      appendStyledText(output, `⟦math:${mathMatch[2]}⟧`, mergeStyle(inheritedStyle, { fontName: "Consolas", color: "#7a3e9d" }));
+      const latex = mathMatch[2].trim();
+      const start = output.text.length;
+      appendStyledText(output, latex, mergeStyle(inheritedStyle, { fontName: "Cambria Math", color: "#7a3e9d" }));
+      output.equations.push({ start, length: latex.length, latex, display: false });
       remaining = remaining.slice(mathMatch.index + mathMatch[0].length);
       continue;
     }
@@ -314,10 +318,11 @@ export function parseInlineMarkdown(input: string, inheritedStyle: TextStyle = {
       style = mergeStyle(inheritedStyle, { subscript: true });
     }
 
-    const nested = found.kind === "code" ? { text: content, runs: [] as TextRun[] } : parseInlineMarkdown(content, style);
+    const nested = found.kind === "code" ? { text: content, runs: [] as TextRun[], equations: [] as NativeEquationRun[] } : parseInlineMarkdown(content, style);
     const offset = output.text.length;
     output.text += nested.text;
     output.runs.push(...nested.runs.map((run) => ({ ...run, start: run.start + offset })));
+    output.equations.push(...nested.equations.map((equation) => ({ ...equation, start: equation.start + offset })));
     if (nested.runs.length === 0 && nested.text.length > 0) {
       output.runs.push({ start: offset, length: nested.text.length, style });
     }
@@ -338,7 +343,7 @@ function pushRichText(
   if (!parsed.text.trim()) {
     return;
   }
-  blocks.push({ kind: "richText", text: parsed.text, runs: parsed.runs, style, role });
+  blocks.push({ kind: "richText", text: parsed.text, runs: parsed.runs, equations: parsed.equations, style, role });
 }
 
 function listItemText(item: any): string {
@@ -363,31 +368,6 @@ function pushListItems(blocks: MarkdownRichBlock[], token: any, depth = 0): void
   });
 }
 
-function pushInlineMathAwareParagraph(blocks: MarkdownRichBlock[], text: string, style: TextStyle, role: "paragraph"): void {
-  let remaining = text;
-  let pending = "";
-
-  while (remaining.length > 0) {
-    const match = inlineMathMatch(remaining);
-    if (!match?.index && match?.index !== 0) {
-      pending += remaining;
-      break;
-    }
-
-    pending += remaining.slice(0, match.index);
-    if (pending.trim()) {
-      pushRichText(blocks, pending.trim(), style, role);
-    }
-    blocks.push({ kind: "math", content: match[2].trim(), display: false });
-    pending = "";
-    remaining = remaining.slice(match.index + match[0].length);
-  }
-
-  if (pending.trim()) {
-    pushRichText(blocks, pending.trim(), style, role);
-  }
-}
-
 function markdownPartToRichBlocks(markdown: string): MarkdownRichBlock[] {
   const tokens = marked.lexer(markdown, { gfm: true, breaks: false }) as any[];
   const blocks: MarkdownRichBlock[] = [];
@@ -400,7 +380,7 @@ function markdownPartToRichBlocks(markdown: string): MarkdownRichBlock[] {
       const fontSize = Math.max(16, 28 - Number(token.depth ?? 1) * 3);
       pushRichText(blocks, token.text ?? "", { fontName: "微软雅黑", fontSize, color: "#000000", bold: true }, "heading");
     } else if (token.type === "paragraph") {
-      pushInlineMathAwareParagraph(blocks, token.text ?? "", { fontName: "微软雅黑", fontSize: 14, color: "#000000" }, "paragraph");
+      pushRichText(blocks, token.text ?? "", { fontName: "微软雅黑", fontSize: 14, color: "#000000" }, "paragraph");
     } else if (token.type === "list") {
       pushListItems(blocks, token);
     } else if (token.type === "html") {
@@ -427,6 +407,7 @@ export function markdownToRichBlocks(markdown: string): MarkdownRichBlock[] {
           kind: "richText",
           text: parsed.text,
           runs: parsed.runs,
+          equations: parsed.equations,
           style: { fontName: "微软雅黑", fontSize: 14, color: "#000000", fillColor: "#ffffff", borderColor: "#000000" },
           role: "quote",
         },

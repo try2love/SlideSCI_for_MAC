@@ -5,9 +5,10 @@ import { generateLabels } from "../lib/labels";
 import { estimateTextBoxSize } from "../lib/textMetrics";
 import { parseLengthToPt } from "../lib/units";
 import type { LayoutMode, SortMode, TitlePlacement } from "../lib/types";
-import { getCodeBlockStyle, getCodeHighlightRuns, CODE_LANGUAGES } from "../services/codeBlock";
+import { getCodeBlockStyle, getCodeHighlightRuns, CODE_LANGUAGES, CODE_LANGUAGE_LABELS } from "../services/codeBlock";
 import { convertLatexToPngBase64 } from "../services/latexSvg";
 import { formatMarkdownRenderResult, markdownToRenderBlocks, renderMarkdownBlocks } from "../services/markdownRender";
+import { checkNativeEquationHelper, convertEquationRuns, formatEquationConversionSummary } from "../services/nativeEquation";
 import {
   addLatexImage,
   addRichTextBox,
@@ -220,7 +221,7 @@ export function App() {
     const result = await renderMarkdownBlocks(blocks, {
       text: async (block) => {
         const boxSize = estimateTextBoxSize(block.text, { fontSize: block.fontSize, monospace: false });
-        await addRichTextBox(
+        const shapeId = await addRichTextBox(
           block.text,
           { left, top, ...boxSize },
           {
@@ -231,10 +232,11 @@ export function App() {
           block.runs,
         );
         top += boxSize.height + 12;
+        return formatEquationConversionSummary(await convertEquationRuns(shapeId, block.equations));
       },
       quote: async (block) => {
         const boxSize = estimateTextBoxSize(block.text, { fontSize: block.style.fontSize ?? 14, monospace: false });
-        await addRichTextBox(
+        const shapeId = await addRichTextBox(
           block.text,
           { left, top, ...boxSize },
           {
@@ -249,6 +251,7 @@ export function App() {
           block.runs,
         );
         top += boxSize.height + 12;
+        return formatEquationConversionSummary(await convertEquationRuns(shapeId, block.equations));
       },
       code: async (block) => {
         const boxSize = estimateTextBoxSize(block.content, { fontSize: 12, monospace: true });
@@ -268,13 +271,34 @@ export function App() {
         return inserted.warning;
       },
       math: async (block) => {
+        const helper = await checkNativeEquationHelper();
+        if (helper.ok && helper.nativeEquationAvailable) {
+          const boxSize = estimateTextBoxSize(block.content, { fontSize: 18, monospace: false, minWidth: 220, maxWidth: 620 });
+          const shapeId = await addRichTextBox(
+            block.content,
+            { left, top, width: Math.max(360, boxSize.width), height: Math.max(54, boxSize.height) },
+            {
+              fontName: "Cambria Math",
+              fontSize: 18,
+              color: "#000000",
+              align: "center",
+            },
+            [{ start: 0, length: block.content.length, style: { fontName: "Cambria Math", color: "#7a3e9d" } }],
+          );
+          const summary = await convertEquationRuns(shapeId, [
+            { start: 0, length: block.content.length, latex: block.content, display: true },
+          ]);
+          top += Math.max(54, boxSize.height) + 12;
+          return formatEquationConversionSummary(summary);
+        }
+
         const image = await convertLatexToPngBase64(block.content, { display: block.display });
         const width = Math.min(520, Math.max(120, image.width * 0.75));
         const height = Math.min(180, Math.max(48, image.height * 0.75));
         const inserted = await addLatexImage(image.base64, { left, top, width, height }, image.latex);
         saveLatexForShape(inserted.id, image.latex);
         top += height + 12;
-        return inserted.warning;
+        return inserted.warning || `本地公式 helper 不可用，块级公式已降级为图片：${helper.message}`;
       },
     });
 
@@ -489,7 +513,7 @@ export function App() {
         <div className="grid">
           <Field label="代码语言">
             <select value={settings.codeLanguage} onChange={(event) => updateSetting("codeLanguage", event.target.value)}>
-              {CODE_LANGUAGES.map((language) => <option key={language} value={language}>{language}</option>)}
+              {CODE_LANGUAGES.map((language) => <option key={language} value={language}>{CODE_LANGUAGE_LABELS[language] ?? language}</option>)}
             </select>
           </Field>
           <label className="check"><input type="checkbox" checked={settings.codeDarkBackground} onChange={(event) => updateSetting("codeDarkBackground", event.target.checked)} />代码黑色背景</label>

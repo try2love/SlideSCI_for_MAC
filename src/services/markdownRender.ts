@@ -1,10 +1,10 @@
 import { mergeRichTextBlocks } from "../lib/textMetrics";
-import type { TextRun, TextStyle } from "../lib/types";
+import type { NativeEquationRun, TextRun, TextStyle } from "../lib/types";
 import { markdownToRichBlocks } from "./markdown";
 
 export type MarkdownRenderBlock =
-  | { kind: "text"; text: string; runs: TextRun[]; fontSize: number }
-  | { kind: "quote"; text: string; runs: TextRun[]; style: TextStyle }
+  | { kind: "text"; text: string; runs: TextRun[]; equations: NativeEquationRun[]; fontSize: number }
+  | { kind: "quote"; text: string; runs: TextRun[]; equations: NativeEquationRun[]; style: TextStyle }
   | { kind: "code"; content: string; language: string }
   | { kind: "table"; rows: string[][] }
   | { kind: "math"; content: string; display?: boolean };
@@ -32,13 +32,13 @@ function messageFromError(error: unknown): string {
 export function markdownToRenderBlocks(markdown: string): MarkdownRenderBlock[] {
   return mergeRichTextBlocks(markdownToRichBlocks(markdown)).map((block): MarkdownRenderBlock => {
     if (block.kind === "mergedRichText") {
-      return { kind: "text", text: block.text, runs: block.runs, fontSize: block.fontSize };
+      return { kind: "text", text: block.text, runs: block.runs, equations: block.equations, fontSize: block.fontSize };
     }
     if (block.kind === "richText") {
       if (block.role === "quote") {
-        return { kind: "quote", text: block.text, runs: block.runs, style: block.style };
+        return { kind: "quote", text: block.text, runs: block.runs, equations: block.equations ?? [], style: block.style };
       }
-      return { kind: "text", text: block.text, runs: block.runs, fontSize: block.style.fontSize ?? 14 };
+      return { kind: "text", text: block.text, runs: block.runs, equations: block.equations ?? [], fontSize: block.style.fontSize ?? 14 };
     }
     return block;
   });

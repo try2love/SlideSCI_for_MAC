@@ -54,3 +54,10 @@ export interface TextRun {
   length: number;
   style: TextRunStyle;
 }
+
+export interface NativeEquationRun {
+  start: number;
+  length: number;
+  latex: string;
+  display?: boolean;
+}

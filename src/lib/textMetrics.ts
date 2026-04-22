@@ -1,4 +1,4 @@
-import type { Box, TextRun } from "./types";
+import type { Box, NativeEquationRun, TextRun } from "./types";
 import type { MarkdownRichBlock } from "../services/markdown";
 
 export interface TextBoxMetricsOptions {
@@ -72,22 +72,25 @@ function blockSpacing(block: MarkdownRichBlock): number {
   return 8;
 }
 
-export function mergeRichTextBlocks(blocks: MarkdownRichBlock[]): Array<MarkdownRichBlock | { kind: "mergedRichText"; text: string; runs: TextRun[]; fontSize: number }> {
-  const result: Array<MarkdownRichBlock | { kind: "mergedRichText"; text: string; runs: TextRun[]; fontSize: number }> = [];
+export function mergeRichTextBlocks(blocks: MarkdownRichBlock[]): Array<MarkdownRichBlock | { kind: "mergedRichText"; text: string; runs: TextRun[]; equations: NativeEquationRun[]; fontSize: number }> {
+  const result: Array<MarkdownRichBlock | { kind: "mergedRichText"; text: string; runs: TextRun[]; equations: NativeEquationRun[]; fontSize: number }> = [];
   let text = "";
   let runs: TextRun[] = [];
+  let equations: NativeEquationRun[] = [];
   let fontSize = 14;
 
   function flush(): void {
     if (!text.trim()) {
       text = "";
       runs = [];
+      equations = [];
       fontSize = 14;
       return;
     }
-    result.push({ kind: "mergedRichText", text: text.replace(/\n+$/, ""), runs, fontSize });
+    result.push({ kind: "mergedRichText", text: text.replace(/\n+$/, ""), runs, equations, fontSize });
     text = "";
     runs = [];
+    equations = [];
     fontSize = 14;
   }
 
@@ -110,6 +113,7 @@ export function mergeRichTextBlocks(blocks: MarkdownRichBlock[]): Array<Markdown
     const shiftedOffset = offset + spacing.length;
     text += block.text;
     runs.push(...block.runs.map((run) => ({ ...run, start: run.start + shiftedOffset })));
+    equations.push(...(block.equations ?? []).map((equation) => ({ ...equation, start: equation.start + shiftedOffset })));
     runs.push({
       start: shiftedOffset,
       length: block.text.length,

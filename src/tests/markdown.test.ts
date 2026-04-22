@@ -67,7 +67,7 @@ const x = 1
 
 $x^2$`);
 
-    expect(blocks.map((block) => block.kind)).toEqual(["richText", "richText", "richText", "richText", "code", "table", "math"]);
+    expect(blocks.map((block) => block.kind)).toEqual(["richText", "richText", "richText", "richText", "code", "table", "richText"]);
     const heading = blocks[0];
     expect(heading.kind).toBe("richText");
     if (heading.kind === "richText") {
@@ -116,12 +116,14 @@ $x^2$`);
     ]);
   });
 
-  it("extracts block and inline math into math blocks", () => {
+  it("extracts block math and keeps inline math inside text blocks", () => {
     const blocks = markdownToRichBlocks(sampleMarkdown);
     const mathBlocks = blocks.filter((block) => block.kind === "math");
-    expect(mathBlocks.length).toBeGreaterThanOrEqual(3);
+    expect(mathBlocks.length).toBe(1);
     expect(mathBlocks.some((block) => block.kind === "math" && block.content.includes("Score"))).toBe(true);
-    expect(mathBlocks.some((block) => block.kind === "math" && block.content === "\\delta")).toBe(true);
+    const equationBlocks = blocks.filter((block) => block.kind === "richText" && block.equations?.length);
+    expect(equationBlocks.some((block) => block.kind === "richText" && block.equations?.some((equation) => equation.latex === "\\delta"))).toBe(true);
+    expect(equationBlocks.some((block) => block.kind === "richText" && block.equations?.some((equation) => equation.latex === "\\lambda"))).toBe(true);
   });
 });
 
@@ -143,14 +145,24 @@ describe("markdown render queue", () => {
     expect(lastTextIndex).toBeGreaterThan(quoteIndex);
   });
 
+  it("renders inline equations in a single text block with equation runs", () => {
+    const blocks = markdownToRenderBlocks("其中，$\\delta$ 是平滑因子，$\\lambda$ 表示噪声衰减系数。");
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].kind).toBe("text");
+    if (blocks[0].kind === "text") {
+      expect(blocks[0].text).toBe("其中，\\delta 是平滑因子，\\lambda 表示噪声衰减系数。");
+      expect(blocks[0].equations.map((equation) => equation.latex)).toEqual(["\\delta", "\\lambda"]);
+    }
+  });
+
   it("continues rendering later modules after one module fails", async () => {
     const calls: string[] = [];
     const result = await renderMarkdownBlocks(
       [
-        { kind: "text", text: "A", runs: [], fontSize: 14 },
+        { kind: "text", text: "A", runs: [], equations: [], fontSize: 14 },
         { kind: "table", rows: [["A"]] },
         { kind: "math", content: "x" },
-        { kind: "quote", text: "B", runs: [], style: {} },
+        { kind: "quote", text: "B", runs: [], equations: [], style: {} },
       ],
       {
         text: async () => {

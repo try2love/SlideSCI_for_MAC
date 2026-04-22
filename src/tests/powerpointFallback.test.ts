@@ -47,7 +47,7 @@ describe("PowerPoint fallback helpers", () => {
     expect(result.mode).toBe("shapeFill");
     expect(result.id).toBe("shape-fill");
     expect(rectangle.fill.setImage).toHaveBeenCalledWith("png-base64");
-    expect(result.warning).toContain("addPicture 不可用");
+    expect(result.warning).toBeUndefined();
   });
 
   it("falls back to a latex source text box when image fill is unavailable", async () => {
@@ -88,5 +88,36 @@ describe("PowerPoint fallback helpers", () => {
     expect(addTextBox).toHaveBeenNthCalledWith(1, "A", { left: 10, top: 20, width: 100, height: 40 });
     expect(addTextBox).toHaveBeenNthCalledWith(4, "2", { left: 110, top: 60, width: 100, height: 40 });
     expect(result.warning).toContain("已降级为文本框网格");
+  });
+
+  it("creates native tables with minimal addTable options", async () => {
+    const table = shape("native-table");
+    const addTable = vi.fn(() => table);
+    installPowerPointMock({ addTable });
+
+    const result = await addTableWithFallback(
+      [
+        ["A", "B"],
+        ["1", "2"],
+      ],
+      { left: 10.2, top: 20.7, width: 200.4, height: 80.4 },
+    );
+
+    expect(result.mode).toBe("nativeTable");
+    expect(addTable).toHaveBeenCalledWith(2, 2, {
+      left: 10,
+      top: 21,
+      width: 200,
+      height: 80,
+      values: [
+        ["A", "B"],
+        ["1", "2"],
+      ],
+    });
+    const firstCall = addTable.mock.calls[0] as unknown as [number, number, Record<string, unknown>];
+    const options = firstCall[2];
+    expect(options).not.toHaveProperty("uniformCellProperties");
+    expect(options).not.toHaveProperty("borders");
+    expect(options).not.toHaveProperty("margins");
   });
 });

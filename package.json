@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
+    "helper": "node scripts/native-equation-helper.mjs",
     "build": "tsc -p tsconfig.json && vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"

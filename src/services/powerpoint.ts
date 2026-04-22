@@ -187,6 +187,22 @@ export async function applyTextRuns(shapeId: string, runs: TextRun[]): Promise<b
   });
 }
 
+export async function selectTextRange(shapeId: string, start: number, length: number): Promise<void> {
+  await withCurrentSlide(async (context, slide) => {
+    const shape = slide.shapes.getItem(shapeId);
+    const textRange = shape?.textFrame?.textRange;
+    if (!textRange?.getSubstring) {
+      throw new Error("当前 PowerPoint 版本不支持选择文本范围。");
+    }
+    const range = textRange.getSubstring(start, length);
+    if (!range?.select) {
+      throw new Error("当前 PowerPoint 版本不支持选择文本范围。");
+    }
+    range.select();
+    await context.sync();
+  });
+}
+
 export async function addRichTextBox(
   text: string,
   box: Box,
@@ -245,21 +261,7 @@ export interface LatexImageInsertResult {
   warning?: string;
 }
 
-async function addLatexPicture(base64: string, box: Box, latex: string): Promise<LatexImageInsertResult> {
-  return withCurrentSlide(async (context, slide) => {
-    if (typeof slide.shapes?.addPicture !== "function") {
-      throw new Error("addPicture 不可用");
-    }
-
-    const shape = slide.shapes.addPicture(base64, box);
-    writeLatexMetadata(shape, latex);
-    shape.load("id");
-    await context.sync();
-    return { id: String(shape.id), mode: "picture" };
-  });
-}
-
-async function addLatexShapeFill(base64: string, box: Box, latex: string, priorErrors: string[]): Promise<LatexImageInsertResult> {
+async function addLatexShapeFill(base64: string, box: Box, latex: string, priorErrors: string[] = []): Promise<LatexImageInsertResult> {
   return withCurrentSlide(async (context, slide) => {
     if (typeof slide.shapes?.addGeometricShape !== "function") {
       throw new Error("addGeometricShape 不可用");
@@ -280,7 +282,25 @@ async function addLatexShapeFill(base64: string, box: Box, latex: string, priorE
     return {
       id: String(shape.id),
       mode: "shapeFill",
-      warning: `${priorErrors.join("；")}，已降级为图片填充。`,
+      warning: priorErrors.length > 0 ? `${priorErrors.join("；")}，已降级为图片填充。` : undefined,
+    };
+  });
+}
+
+async function addLatexPicture(base64: string, box: Box, latex: string, priorErrors: string[]): Promise<LatexImageInsertResult> {
+  return withCurrentSlide(async (context, slide) => {
+    if (typeof slide.shapes?.addPicture !== "function") {
+      throw new Error("addPicture 不可用");
+    }
+
+    const shape = slide.shapes.addPicture(base64, box);
+    writeLatexMetadata(shape, latex);
+    shape.load("id");
+    await context.sync();
+    return {
+      id: String(shape.id),
+      mode: "picture",
+      warning: `${priorErrors.join("；")}，已降级为 addPicture 图片。`,
     };
   });
 }
@@ -315,15 +335,15 @@ export async function addLatexImage(base64: string, box: Box, latex: string): Pr
   const errors: string[] = [];
 
   try {
-    return await addLatexPicture(base64, box, latex);
+    return await addLatexShapeFill(base64, box, latex);
   } catch (error) {
-    errors.push(`addPicture 失败：${errorMessage(error)}`);
+    errors.push(`fill.setImage 失败：${errorMessage(error)}`);
   }
 
   try {
-    return await addLatexShapeFill(base64, box, latex, errors);
+    return await addLatexPicture(base64, box, latex, errors);
   } catch (error) {
-    errors.push(`fill.setImage 失败：${errorMessage(error)}`);
+    errors.push(`addPicture 失败：${errorMessage(error)}`);
   }
 
   try {
@@ -339,16 +359,6 @@ export interface TableInsertResult {
   ids: string[];
   mode: "nativeTable" | "textGrid";
   warning?: string;
-}
-
-function tableBorderProperties(): any {
-  const border = { color: "#000000", weight: 1, transparency: 0 };
-  return {
-    left: border,
-    right: border,
-    top: border,
-    bottom: border,
-  };
 }
 
 export async function addTable(rows: string[][], box: Box): Promise<string> {
@@ -369,12 +379,11 @@ async function addNativeTable(rows: string[][], box: Box): Promise<TableInsertRe
     const normalizedRows = normalizeTableRows(rows);
     const columnCount = normalizedRows[0]?.length ?? 0;
     const shape = slide.shapes.addTable(rows.length, columnCount, {
-      ...box,
+      left: Math.round(box.left),
+      top: Math.round(box.top),
+      width: Math.max(1, Math.round(box.width)),
+      height: Math.max(1, Math.round(box.height)),
       values: normalizedRows,
-      uniformCellProperties: {
-        borders: tableBorderProperties(),
-        margins: { left: 4, right: 4, top: 3, bottom: 3 },
-      },
     });
     shape.load("id");
     await context.sync();
