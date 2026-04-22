@@ -50,12 +50,16 @@ describe("mergeRichTextBlocks", () => {
     }
   });
 
-  it("keeps code/table/math blocks separate", () => {
+  it("keeps code/table/math/quote blocks separate", () => {
     const blocks: MarkdownRichBlock[] = [
       { kind: "richText", text: "A", runs: [], style: { fontSize: 14 }, role: "paragraph" },
       { kind: "code", content: "print(1)", language: "python" },
       { kind: "richText", text: "B", runs: [], style: { fontSize: 14 }, role: "paragraph" },
+      { kind: "richText", text: "quote", runs: [], style: { fontSize: 14 }, role: "quote" },
+      { kind: "richText", text: "C", runs: [], style: { fontSize: 14 }, role: "paragraph" },
     ];
-    expect(mergeRichTextBlocks(blocks).map((block) => block.kind)).toEqual(["mergedRichText", "code", "mergedRichText"]);
+    const merged = mergeRichTextBlocks(blocks);
+    expect(merged.map((block) => block.kind)).toEqual(["mergedRichText", "code", "mergedRichText", "richText", "mergedRichText"]);
+    expect(merged[3].kind === "richText" && merged[3].role).toBe("quote");
   });
 });

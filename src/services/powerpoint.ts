@@ -202,6 +202,10 @@ export async function addSvgPicture(svg: string, box: Box): Promise<string> {
   return addBase64Picture(btoa(unescape(encodeURIComponent(svg))), box);
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function writeLatexMetadata(shape: OfficeShape, latex?: string): void {
   if (!latex) {
     return;
@@ -235,29 +239,205 @@ export async function addBase64Picture(base64: string, box: Box, metadata?: { la
   });
 }
 
-export async function addTable(rows: string[][], box: Box): Promise<string> {
+export interface LatexImageInsertResult {
+  id: string;
+  mode: "picture" | "shapeFill" | "textFallback";
+  warning?: string;
+}
+
+async function addLatexPicture(base64: string, box: Box, latex: string): Promise<LatexImageInsertResult> {
   return withCurrentSlide(async (context, slide) => {
-    if (!slide.shapes?.addTable) {
-      throw new Error("当前 PowerPoint 版本不支持添加表格。");
+    if (typeof slide.shapes?.addPicture !== "function") {
+      throw new Error("addPicture 不可用");
     }
-    const columnCount = Math.max(...rows.map((row) => row.length));
-    const normalizedRows = rows.map((row) => Array.from({ length: columnCount }, (_, index) => row[index] ?? ""));
+
+    const shape = slide.shapes.addPicture(base64, box);
+    writeLatexMetadata(shape, latex);
+    shape.load("id");
+    await context.sync();
+    return { id: String(shape.id), mode: "picture" };
+  });
+}
+
+async function addLatexShapeFill(base64: string, box: Box, latex: string, priorErrors: string[]): Promise<LatexImageInsertResult> {
+  return withCurrentSlide(async (context, slide) => {
+    if (typeof slide.shapes?.addGeometricShape !== "function") {
+      throw new Error("addGeometricShape 不可用");
+    }
+
+    const shape = slide.shapes.addGeometricShape("Rectangle", box);
+    if (!shape.fill?.setImage) {
+      throw new Error("shape.fill.setImage 不可用");
+    }
+    shape.fill.setImage(base64);
+    if (shape.lineFormat) {
+      shape.lineFormat.color = "#ffffff";
+      shape.lineFormat.weight = 0;
+    }
+    writeLatexMetadata(shape, latex);
+    shape.load("id");
+    await context.sync();
+    return {
+      id: String(shape.id),
+      mode: "shapeFill",
+      warning: `${priorErrors.join("；")}，已降级为图片填充。`,
+    };
+  });
+}
+
+async function addLatexTextFallback(box: Box, latex: string, priorErrors: string[]): Promise<LatexImageInsertResult> {
+  return withCurrentSlide(async (context, slide) => {
+    if (typeof slide.shapes?.addTextBox !== "function") {
+      throw new Error("addTextBox 不可用");
+    }
+
+    const shape = slide.shapes.addTextBox(latex, box);
+    applyShapeStyle(shape, {
+      fontName: "Consolas",
+      fontSize: 14,
+      color: "#000000",
+      fillColor: "#fff8dc",
+      borderColor: "#c00000",
+      borderWeight: 1,
+    });
+    writeLatexMetadata(shape, latex);
+    shape.load("id");
+    await context.sync();
+    return {
+      id: String(shape.id),
+      mode: "textFallback",
+      warning: `${priorErrors.join("；")}，已降级为 LaTeX 源码文本框。`,
+    };
+  });
+}
+
+export async function addLatexImage(base64: string, box: Box, latex: string): Promise<LatexImageInsertResult> {
+  const errors: string[] = [];
+
+  try {
+    return await addLatexPicture(base64, box, latex);
+  } catch (error) {
+    errors.push(`addPicture 失败：${errorMessage(error)}`);
+  }
+
+  try {
+    return await addLatexShapeFill(base64, box, latex, errors);
+  } catch (error) {
+    errors.push(`fill.setImage 失败：${errorMessage(error)}`);
+  }
+
+  try {
+    return await addLatexTextFallback(box, latex, errors);
+  } catch (error) {
+    errors.push(`文本降级失败：${errorMessage(error)}`);
+  }
+
+  throw new Error(`LaTeX 图片插入失败：${errors.join("；")}`);
+}
+
+export interface TableInsertResult {
+  ids: string[];
+  mode: "nativeTable" | "textGrid";
+  warning?: string;
+}
+
+function tableBorderProperties(): any {
+  const border = { color: "#000000", weight: 1, transparency: 0 };
+  return {
+    left: border,
+    right: border,
+    top: border,
+    bottom: border,
+  };
+}
+
+export async function addTable(rows: string[][], box: Box): Promise<string> {
+  const result = await addTableWithFallback(rows, box);
+  return result.ids[0];
+}
+
+function normalizeTableRows(rows: string[][]): string[][] {
+  const columnCount = Math.max(...rows.map((row) => row.length));
+  return rows.map((row) => Array.from({ length: columnCount }, (_, index) => row[index] ?? ""));
+}
+
+async function addNativeTable(rows: string[][], box: Box): Promise<TableInsertResult> {
+  return withCurrentSlide(async (context, slide) => {
+    if (typeof slide.shapes?.addTable !== "function") {
+      throw new Error("addTable 不可用");
+    }
+    const normalizedRows = normalizeTableRows(rows);
+    const columnCount = normalizedRows[0]?.length ?? 0;
     const shape = slide.shapes.addTable(rows.length, columnCount, {
       ...box,
       values: normalizedRows,
       uniformCellProperties: {
-        borders: {
-          left: { color: "#b7b7b7", weight: 1 },
-          right: { color: "#b7b7b7", weight: 1 },
-          top: { color: "#b7b7b7", weight: 1 },
-          bottom: { color: "#b7b7b7", weight: 1 },
-        },
+        borders: tableBorderProperties(),
+        margins: { left: 4, right: 4, top: 3, bottom: 3 },
       },
     });
     shape.load("id");
     await context.sync();
-    return String(shape.id);
+    return { ids: [String(shape.id)], mode: "nativeTable" };
   });
+}
+
+async function addTableTextGrid(rows: string[][], box: Box, priorErrors: string[]): Promise<TableInsertResult> {
+  return withCurrentSlide(async (context, slide) => {
+    if (typeof slide.shapes?.addTextBox !== "function") {
+      throw new Error("addTextBox 不可用");
+    }
+
+    const normalizedRows = normalizeTableRows(rows);
+    const columnCount = normalizedRows[0]?.length ?? 0;
+    const cellShapes: OfficeShape[] = [];
+    const cellWidth = box.width / columnCount;
+    const cellHeight = box.height / rows.length;
+    normalizedRows.forEach((row, rowIndex) => {
+      row.forEach((cell, columnIndex) => {
+        const shape = slide.shapes.addTextBox(cell, {
+          left: box.left + columnIndex * cellWidth,
+          top: box.top + rowIndex * cellHeight,
+          width: cellWidth,
+          height: cellHeight,
+        });
+        applyShapeStyle(shape, {
+          fontName: "微软雅黑",
+          fontSize: rowIndex === 0 ? 12 : 11,
+          bold: rowIndex === 0,
+          color: "#000000",
+          fillColor: rowIndex === 0 ? "#f2f2f2" : "#ffffff",
+          borderColor: "#000000",
+          borderWeight: 1,
+        });
+        shape.load("id");
+        cellShapes.push(shape);
+      });
+    });
+    await context.sync();
+    return {
+      ids: cellShapes.map((shape) => String(shape.id)),
+      mode: "textGrid",
+      warning: `${priorErrors.join("；")}，已降级为文本框网格。`,
+    };
+  });
+}
+
+export async function addTableWithFallback(rows: string[][], box: Box): Promise<TableInsertResult> {
+  const errors: string[] = [];
+  try {
+    return await addNativeTable(rows, box);
+  } catch (error) {
+    errors.push(`addTable 失败：${errorMessage(error)}`);
+  }
+
+  try {
+    return await addTableTextGrid(rows, box, errors);
+  } catch (error) {
+    errors.push(`文本框网格失败：${errorMessage(error)}`);
+  }
+
+  throw new Error(`表格插入失败：${errors.join("；")}`);
 }
 
 export async function updateShapesLayout(layouts: ShapeLayout[]): Promise<void> {

@@ -2,16 +2,16 @@ import { useMemo, useState } from "react";
 import { arrangeShapes } from "../lib/layout";
 import { LABEL_TEMPLATES } from "../lib/labels";
 import { generateLabels } from "../lib/labels";
-import { estimateTextBoxSize, mergeRichTextBlocks } from "../lib/textMetrics";
+import { estimateTextBoxSize } from "../lib/textMetrics";
 import { parseLengthToPt } from "../lib/units";
 import type { LayoutMode, SortMode, TitlePlacement } from "../lib/types";
 import { getCodeBlockStyle, getCodeHighlightRuns, CODE_LANGUAGES } from "../services/codeBlock";
 import { convertLatexToPngBase64 } from "../services/latexSvg";
-import { markdownToRichBlocks } from "../services/markdown";
+import { formatMarkdownRenderResult, markdownToRenderBlocks, renderMarkdownBlocks } from "../services/markdownRender";
 import {
-  addBase64Picture,
+  addLatexImage,
   addRichTextBox,
-  addTable,
+  addTableWithFallback,
   addTextBox,
   applyShapeStyleToSelected,
   copySelectedFormat,
@@ -81,12 +81,12 @@ export function App() {
     setSettings({ ...settings, [key]: value });
   }
 
-  async function run(label: string, action: () => Promise<void>): Promise<void> {
+  async function run(label: string, action: () => Promise<string | void>): Promise<void> {
     setBusy(true);
     setStatus(`${label}...`);
     try {
-      await action();
-      setStatus(`${label}完成。`);
+      const message = await action();
+      setStatus(message || `${label}完成。`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     } finally {
@@ -189,12 +189,15 @@ export function App() {
     );
   }
 
-  async function insertLatexSvg(): Promise<void> {
+  async function insertLatexSvg(): Promise<string | void> {
     const image = await convertLatexToPngBase64(latex);
     const width = Math.min(520, Math.max(120, image.width * 0.75));
     const height = Math.min(180, Math.max(48, image.height * 0.75));
-    const shapeId = await addBase64Picture(image.base64, { left: 160, top: 120, width, height }, { latex: image.latex });
-    saveLatexForShape(shapeId, image.latex);
+    const inserted = await addLatexImage(image.base64, { left: 160, top: 120, width, height }, image.latex);
+    saveLatexForShape(inserted.id, image.latex);
+    if (inserted.warning) {
+      return `插入 LaTeX SVG 完成：${inserted.warning}`;
+    }
   }
 
   async function loadLatexFromSelection(): Promise<void> {
@@ -206,37 +209,16 @@ export function App() {
     setLatex(source);
   }
 
-  async function insertMarkdown(): Promise<void> {
-    const blocks = mergeRichTextBlocks(markdownToRichBlocks(markdown));
+  async function insertMarkdown(): Promise<string> {
+    const blocks = markdownToRenderBlocks(markdown);
     if (blocks.length === 0) {
       throw new Error("请输入 Markdown 内容。");
     }
 
     let top = 80;
     const left = 80;
-    for (const block of blocks) {
-      if (block.kind === "code") {
-        const boxSize = estimateTextBoxSize(block.content, { fontSize: 12, monospace: true });
-        await addRichTextBox(
-          block.content,
-          { left, top, ...boxSize },
-          getCodeBlockStyle(settings.codeDarkBackground),
-          getCodeHighlightRuns(block.content, block.language, settings.codeDarkBackground),
-        );
-        top += boxSize.height + 12;
-      } else if (block.kind === "table") {
-        const tableWidth = Math.min(620, Math.max(240, Math.max(...block.rows.map((row) => row.join("").length)) * 9));
-        const tableHeight = Math.max(80, block.rows.length * 28);
-        await addTable(block.rows, { left, top, width: tableWidth, height: tableHeight });
-        top += tableHeight + 12;
-      } else if (block.kind === "math") {
-        const image = await convertLatexToPngBase64(block.content);
-        const width = Math.min(520, Math.max(120, image.width * 0.75));
-        const height = Math.min(180, Math.max(48, image.height * 0.75));
-        const shapeId = await addBase64Picture(image.base64, { left, top, width, height }, { latex: image.latex });
-        saveLatexForShape(shapeId, image.latex);
-        top += height + 12;
-      } else if (block.kind === "mergedRichText") {
+    const result = await renderMarkdownBlocks(blocks, {
+      text: async (block) => {
         const boxSize = estimateTextBoxSize(block.text, { fontSize: block.fontSize, monospace: false });
         await addRichTextBox(
           block.text,
@@ -249,8 +231,57 @@ export function App() {
           block.runs,
         );
         top += boxSize.height + 12;
-      }
+      },
+      quote: async (block) => {
+        const boxSize = estimateTextBoxSize(block.text, { fontSize: block.style.fontSize ?? 14, monospace: false });
+        await addRichTextBox(
+          block.text,
+          { left, top, ...boxSize },
+          {
+            fontName: "微软雅黑",
+            fontSize: 14,
+            color: "#000000",
+            fillColor: "#ffffff",
+            borderColor: "#000000",
+            borderWeight: 1,
+            ...block.style,
+          },
+          block.runs,
+        );
+        top += boxSize.height + 12;
+      },
+      code: async (block) => {
+        const boxSize = estimateTextBoxSize(block.content, { fontSize: 12, monospace: true });
+        await addRichTextBox(
+          block.content,
+          { left, top, ...boxSize },
+          getCodeBlockStyle(settings.codeDarkBackground),
+          getCodeHighlightRuns(block.content, block.language, settings.codeDarkBackground),
+        );
+        top += boxSize.height + 12;
+      },
+      table: async (block) => {
+        const tableWidth = Math.min(620, Math.max(240, Math.max(...block.rows.map((row) => row.join("").length)) * 9));
+        const tableHeight = Math.max(80, block.rows.length * 28);
+        const inserted = await addTableWithFallback(block.rows, { left, top, width: tableWidth, height: tableHeight });
+        top += tableHeight + 12;
+        return inserted.warning;
+      },
+      math: async (block) => {
+        const image = await convertLatexToPngBase64(block.content, { display: block.display });
+        const width = Math.min(520, Math.max(120, image.width * 0.75));
+        const height = Math.min(180, Math.max(48, image.height * 0.75));
+        const inserted = await addLatexImage(image.base64, { left, top, width, height }, image.latex);
+        saveLatexForShape(inserted.id, image.latex);
+        top += height + 12;
+        return inserted.warning;
+      },
+    });
+
+    if (result.successCount === 0 && result.failures.length > 0) {
+      throw new Error(formatMarkdownRenderResult(result));
     }
+    return formatMarkdownRenderResult(result);
   }
 
   async function copyPosition(): Promise<void> {

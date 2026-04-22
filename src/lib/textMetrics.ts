@@ -98,6 +98,12 @@ export function mergeRichTextBlocks(blocks: MarkdownRichBlock[]): Array<Markdown
       continue;
     }
 
+    if (block.role === "quote") {
+      flush();
+      result.push(block);
+      continue;
+    }
+
     const offset = text.length;
     const spacing = text.length > 0 ? "\n".repeat(blockSpacing(block) > 6 ? 2 : 1) : "";
     text += spacing;

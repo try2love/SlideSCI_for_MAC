@@ -7,6 +7,7 @@ import {
   splitMarkdownDocument,
   splitMarkdownIntoSegments,
 } from "../services/markdown";
+import { markdownToRenderBlocks, renderMarkdownBlocks } from "../services/markdownRender";
 
 describe("splitMarkdownIntoSegments", () => {
   it("splits text, code, table, math, and quote blocks", () => {
@@ -121,5 +122,59 @@ $x^2$`);
     expect(mathBlocks.length).toBeGreaterThanOrEqual(3);
     expect(mathBlocks.some((block) => block.kind === "math" && block.content.includes("Score"))).toBe(true);
     expect(mathBlocks.some((block) => block.kind === "math" && block.content === "\\delta")).toBe(true);
+  });
+});
+
+describe("markdown render queue", () => {
+  it("keeps special modules independent and preserves test.md order", () => {
+    const blocks = markdownToRenderBlocks(sampleMarkdown);
+    const kinds = blocks.map((block) => block.kind);
+    const tableIndex = kinds.indexOf("table");
+    const mathIndex = kinds.indexOf("math");
+    const codeIndex = kinds.indexOf("code");
+    const quoteIndex = kinds.indexOf("quote");
+    const lastTextIndex = kinds.lastIndexOf("text");
+
+    expect(kinds).toContain("text");
+    expect(tableIndex).toBeGreaterThan(-1);
+    expect(mathIndex).toBeGreaterThan(tableIndex);
+    expect(codeIndex).toBeGreaterThan(mathIndex);
+    expect(quoteIndex).toBeGreaterThan(codeIndex);
+    expect(lastTextIndex).toBeGreaterThan(quoteIndex);
+  });
+
+  it("continues rendering later modules after one module fails", async () => {
+    const calls: string[] = [];
+    const result = await renderMarkdownBlocks(
+      [
+        { kind: "text", text: "A", runs: [], fontSize: 14 },
+        { kind: "table", rows: [["A"]] },
+        { kind: "math", content: "x" },
+        { kind: "quote", text: "B", runs: [], style: {} },
+      ],
+      {
+        text: async () => {
+          calls.push("text");
+        },
+        table: async () => {
+          calls.push("table");
+          throw new Error("table failed");
+        },
+        math: async () => {
+          calls.push("math");
+        },
+        quote: async () => {
+          calls.push("quote");
+        },
+        code: async () => {
+          calls.push("code");
+        },
+      },
+    );
+
+    expect(calls).toEqual(["text", "table", "math", "quote"]);
+    expect(result.successCount).toBe(3);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0].kind).toBe("table");
   });
 });

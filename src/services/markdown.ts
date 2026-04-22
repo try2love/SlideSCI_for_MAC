@@ -5,14 +5,14 @@ export type MarkdownSegment =
   | { kind: "text"; content: string }
   | { kind: "code"; content: string; language: string }
   | { kind: "table"; rows: string[][] }
-  | { kind: "math"; content: string }
+  | { kind: "math"; content: string; display?: boolean }
   | { kind: "quote"; content: string };
 
 export type MarkdownDocumentBlock =
   | { kind: "markdown"; content: string }
   | { kind: "code"; content: string; language: string }
   | { kind: "table"; rows: string[][] }
-  | { kind: "math"; content: string }
+  | { kind: "math"; content: string; display?: boolean }
   | { kind: "quote"; content: string };
 
 export type MarkdownRichBlock =
@@ -25,7 +25,7 @@ export type MarkdownRichBlock =
     }
   | { kind: "code"; content: string; language: string }
   | { kind: "table"; rows: string[][] }
-  | { kind: "math"; content: string };
+  | { kind: "math"; content: string; display?: boolean };
 
 function decodeHtmlEntities(text: string): string {
   return text
@@ -173,7 +173,7 @@ export function splitMarkdownDocument(markdown: string): MarkdownDocumentBlock[]
       flushMarkdown();
       const math = parseMathBlock(lines, index);
       if (math.content) {
-        blocks.push({ kind: "math", content: math.content });
+        blocks.push({ kind: "math", content: math.content, display: true });
       }
       index = math.nextIndex;
       continue;
@@ -378,7 +378,7 @@ function pushInlineMathAwareParagraph(blocks: MarkdownRichBlock[], text: string,
     if (pending.trim()) {
       pushRichText(blocks, pending.trim(), style, role);
     }
-    blocks.push({ kind: "math", content: match[2].trim() });
+    blocks.push({ kind: "math", content: match[2].trim(), display: false });
     pending = "";
     remaining = remaining.slice(match.index + match[0].length);
   }

@@ -24,14 +24,18 @@ const html = mathjax.document("", {
   OutputJax: svg,
 });
 
-export function convertLatexToSvg(input: string): string {
+function encodeBase64Utf8(text: string): string {
+  return btoa(unescape(encodeURIComponent(text)));
+}
+
+export function convertLatexToSvg(input: string, options: { display?: boolean } = {}): string {
   const normalized = normalizeLatexInput(input);
   if (!normalized) {
     throw new Error("LaTeX 公式不能为空。");
   }
 
   const node = html.convert(normalized, {
-    display: shouldUseDisplayMode(input),
+    display: options.display ?? shouldUseDisplayMode(input),
     em: 20,
     ex: 10,
     containerWidth: 80 * 20,
@@ -69,43 +73,38 @@ export interface LatexPngResult {
   height: number;
 }
 
-export async function convertLatexToPngBase64(input: string): Promise<LatexPngResult> {
+export async function convertLatexToPngBase64(input: string, options: { display?: boolean } = {}): Promise<LatexPngResult> {
   const latex = normalizeLatexInput(input);
-  const svgText = convertLatexToSvg(input);
+  const svgText = convertLatexToSvg(input, options);
   if (typeof document === "undefined" || typeof Image === "undefined") {
     throw new Error("当前环境不支持浏览器 Canvas，无法生成 LaTeX 图片。");
   }
 
-  const svgBlob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
-  const url = URL.createObjectURL(svgBlob);
-  try {
-    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error("LaTeX SVG 转图片失败。"));
-      img.src = url;
-    });
-    const fallback = parseSvgSize(svgText);
-    const scale = 2;
-    const width = Math.max(1, image.naturalWidth || fallback.width);
-    const height = Math.max(1, image.naturalHeight || fallback.height);
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.ceil(width * scale);
-    canvas.height = Math.ceil(height * scale);
-    const context = canvas.getContext("2d");
-    if (!context) {
-      throw new Error("当前环境无法创建 Canvas。");
-    }
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL("image/png");
-    const base64 = dataUrl.split(",")[1];
-    if (!base64) {
-      throw new Error("LaTeX PNG 编码失败。");
-    }
-    return { latex, svg: svgText, base64, width, height };
-  } finally {
-    URL.revokeObjectURL(url);
+  const svgDataUrl = `data:image/svg+xml;base64,${encodeBase64Utf8(svgText)}`;
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("LaTeX SVG 转 PNG 失败：WebView 无法加载 SVG data URL。"));
+    img.src = svgDataUrl;
+  });
+  const fallback = parseSvgSize(svgText);
+  const scale = 2;
+  const width = Math.max(1, image.naturalWidth || fallback.width);
+  const height = Math.max(1, image.naturalHeight || fallback.height);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(width * scale);
+  canvas.height = Math.ceil(height * scale);
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("当前环境无法创建 Canvas，不能生成 LaTeX PNG。");
   }
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL("image/png");
+  const base64 = dataUrl.split(",")[1];
+  if (!base64) {
+    throw new Error("LaTeX PNG 编码失败。");
+  }
+  return { latex, svg: svgText, base64, width, height };
 }

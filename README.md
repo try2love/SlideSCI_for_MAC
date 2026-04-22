@@ -37,9 +37,11 @@ Mac PowerPoint 本地侧载传统 XML manifest：
 
 ## Markdown 与 LaTeX 验收
 
-`test.md` 是固定回归样例。把它全文复制到 Markdown 输入框后，应按原文顺序插入标题、普通段落、普通列表、任务列表、表格、数学公式、代码块、引述块和有序列表。任务列表会转换成 `☑` / `☐` 前缀；表格会去掉单元格内的 Markdown 标记；公式会用 MathJax 在浏览器端渲染成 PNG 图片插入。
+`test.md` 是固定回归样例。把它全文复制到 Markdown 输入框后，应按原文顺序插入标题、普通段落、普通列表、任务列表、表格、数学公式、代码块、引述块和有序列表，直到“归档步骤”结束。任务列表会转换成 `☑` / `☐` 前缀；表格会去掉单元格内的 Markdown 标记；公式会用 MathJax 在浏览器端渲染成 PNG 图片插入。
 
-LaTeX 插入后会同时把原始公式写入 shape tags、alt text 和本地缓存。选中由本插件插入的公式图片后点击“读取选中 LaTeX”，会按 tags -> alt text -> localStorage 的顺序回填公式输入框。
+表格、代码块、块级公式和引述块会作为独立模块插入。某个模块在当前 PowerPoint API 下失败时，插件会继续插入后续模块，并在状态栏显示失败或降级原因。表格优先使用原生 PowerPoint table；如果 `addTable` 不可用，会降级为带边框的文本框网格。
+
+LaTeX 插入优先使用 `addPicture`；如果当前 Mac PowerPoint 不支持该 preview API，会降级为矩形图片填充；如果图片路径全部不可用，才降级为 LaTeX 源码文本框。插入后会同时把原始公式写入 shape tags、alt text 和本地缓存。选中由本插件插入的公式图片后点击“读取选中 LaTeX”，会按 tags -> alt text -> localStorage 的顺序回填公式输入框。
 
 如果修改代码后 PowerPoint 里仍显示旧界面，先完全退出 PowerPoint，再清理缓存：
 
