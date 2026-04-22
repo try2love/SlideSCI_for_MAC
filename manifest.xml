@@ -13,7 +13,7 @@
   <Description DefaultValue="科研汇报用 PowerPoint 辅助插件的 Mac Office.js 版本。" />
   <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png" />
   <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-80.png" />
-  <SupportUrl DefaultValue="https://github.com/Achuan-2/SlideSCI" />
+  <SupportUrl DefaultValue="https://github.com/try2love/SlideSCI_for_MAC" />
   <AppDomains>
     <AppDomain>https://localhost:3000</AppDomain>
   </AppDomains>

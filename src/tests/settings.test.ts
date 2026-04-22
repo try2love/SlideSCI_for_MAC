@@ -32,4 +32,13 @@ describe("settings persistence helpers", () => {
     saveLatexForShape("shape-1", "\\frac{a}{b}");
     expect(getLatexForShape("shape-1")).toBe("\\frac{a}{b}");
   });
+
+  it("keeps position and size clipboard state independent", () => {
+    saveClipboardState({ centers: [{ left: 1, top: 2 }] });
+    saveClipboardState({ ...loadClipboardState(), width: 10, height: 20 });
+    const state = loadClipboardState();
+    expect(state.centers).toEqual([{ left: 1, top: 2 }]);
+    expect(state.width).toBe(10);
+    expect(state.height).toBe(20);
+  });
 });

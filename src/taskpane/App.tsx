@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { arrangeShapes } from "../lib/layout";
 import { LABEL_TEMPLATES } from "../lib/labels";
 import { generateLabels } from "../lib/labels";
+import { estimateTextBoxSize, mergeRichTextBlocks } from "../lib/textMetrics";
 import { parseLengthToPt } from "../lib/units";
 import type { LayoutMode, SortMode, TitlePlacement } from "../lib/types";
 import { getCodeBlockStyle, getCodeHighlightRuns, CODE_LANGUAGES } from "../services/codeBlock";
@@ -178,9 +179,10 @@ export function App() {
     if (!code.trim()) {
       throw new Error("请输入代码内容。");
     }
+    const boxSize = estimateTextBoxSize(code.trim(), { fontSize: 12, monospace: true });
     await addRichTextBox(
       code.trim(),
-      { left: 80, top: 80, width: 500, height: 220 },
+      { left: 80, top: 80, ...boxSize },
       getCodeBlockStyle(settings.codeDarkBackground),
       getCodeHighlightRuns(code.trim(), settings.codeLanguage, settings.codeDarkBackground),
     );
@@ -205,7 +207,7 @@ export function App() {
   }
 
   async function insertMarkdown(): Promise<void> {
-    const blocks = markdownToRichBlocks(markdown);
+    const blocks = mergeRichTextBlocks(markdownToRichBlocks(markdown));
     if (blocks.length === 0) {
       throw new Error("请输入 Markdown 内容。");
     }
@@ -214,45 +216,64 @@ export function App() {
     const left = 80;
     for (const block of blocks) {
       if (block.kind === "code") {
+        const boxSize = estimateTextBoxSize(block.content, { fontSize: 12, monospace: true });
         await addRichTextBox(
           block.content,
-          { left, top, width: 500, height: 180 },
+          { left, top, ...boxSize },
           getCodeBlockStyle(settings.codeDarkBackground),
           getCodeHighlightRuns(block.content, block.language, settings.codeDarkBackground),
         );
-        top += 190;
+        top += boxSize.height + 12;
       } else if (block.kind === "table") {
-        await addTable(block.rows, { left, top, width: 500, height: Math.max(80, block.rows.length * 28) });
-        top += Math.max(90, block.rows.length * 32);
+        const tableWidth = Math.min(620, Math.max(240, Math.max(...block.rows.map((row) => row.join("").length)) * 9));
+        const tableHeight = Math.max(80, block.rows.length * 28);
+        await addTable(block.rows, { left, top, width: tableWidth, height: tableHeight });
+        top += tableHeight + 12;
       } else if (block.kind === "math") {
         const svg = convertLatexToSvg(block.content);
         const shapeId = await addSvgPicture(svg, { left, top, width: 420, height: 120 });
         saveLatexForShape(shapeId, block.content);
         top += 130;
-      } else {
+      } else if (block.kind === "mergedRichText") {
+        const boxSize = estimateTextBoxSize(block.text, { fontSize: block.fontSize, monospace: false });
         await addRichTextBox(
           block.text,
-          { left, top, width: 500, height: block.role === "heading" ? 70 : 120 },
-          block.style,
+          { left, top, ...boxSize },
+          {
+            fontName: "微软雅黑",
+            fontSize: 14,
+            color: "#000000",
+          },
           block.runs,
         );
-        top += block.role === "heading" ? 80 : block.role === "quote" ? 100 : 130;
+        top += boxSize.height + 12;
       }
     }
   }
 
-  async function copyPositionAndSize(): Promise<void> {
+  async function copyPosition(): Promise<void> {
     const shapes = await getSelectedShapes();
     if (shapes.length === 0) {
       throw new Error("请先选择对象。");
     }
     saveClipboardState({
-      width: shapes[0].width,
-      height: shapes[0].height,
+      ...loadClipboardState(),
       centers: shapes.map((shape) => ({
         left: shape.left + shape.width / 2,
         top: shape.top + shape.height / 2,
       })),
+    });
+  }
+
+  async function copySize(): Promise<void> {
+    const shapes = await getSelectedShapes();
+    if (shapes.length === 0) {
+      throw new Error("请先选择对象。");
+    }
+    saveClipboardState({
+      ...loadClipboardState(),
+      width: shapes[0].width,
+      height: shapes[0].height,
     });
   }
 
@@ -452,14 +473,21 @@ export function App() {
       </Section>
 
       <Section title="格式工具">
-        <div className="actions">
-          <button disabled={!canRun} onClick={() => void run("复制位置和尺寸", copyPositionAndSize)}>复制位置/宽高</button>
-          <button disabled={!canRun} onClick={() => void run("粘贴位置", pastePosition)}>粘贴位置</button>
-          <button disabled={!canRun} onClick={() => void run("粘贴宽度", () => pasteWidthHeight("width"))}>粘贴宽度</button>
-          <button disabled={!canRun} onClick={() => void run("粘贴高度", () => pasteWidthHeight("height"))}>粘贴高度</button>
-          <button disabled={!canRun} onClick={() => void run("粘贴宽高", () => pasteWidthHeight("both"))}>粘贴宽高</button>
-          <button disabled={!canRun} onClick={() => void run("复制格式", copyStyle)}>复制格式</button>
-          <button disabled={!canRun} onClick={() => void run("粘贴格式", pasteStyle)}>粘贴格式</button>
+        <div className="toolRows">
+          <div className="toolRow">
+            <button className="copyButton" disabled={!canRun} onClick={() => void run("复制位置", copyPosition)}>复制位置</button>
+            <button className="pasteButton" disabled={!canRun} onClick={() => void run("粘贴位置", pastePosition)}>粘贴位置</button>
+          </div>
+          <div className="toolRow">
+            <button className="copyButton" disabled={!canRun} onClick={() => void run("复制宽高", copySize)}>复制宽高</button>
+            <button className="pasteButton" disabled={!canRun} onClick={() => void run("粘贴宽度", () => pasteWidthHeight("width"))}>粘贴宽度</button>
+            <button className="pasteButton" disabled={!canRun} onClick={() => void run("粘贴高度", () => pasteWidthHeight("height"))}>粘贴高度</button>
+            <button className="pasteButton" disabled={!canRun} onClick={() => void run("粘贴宽高", () => pasteWidthHeight("both"))}>粘贴宽高</button>
+          </div>
+          <div className="toolRow">
+            <button className="copyButton" disabled={!canRun} onClick={() => void run("复制格式", copyStyle)}>复制格式</button>
+            <button className="pasteButton" disabled={!canRun} onClick={() => void run("粘贴格式", pasteStyle)}>粘贴格式</button>
+          </div>
         </div>
         <button className="secondary" onClick={() => setSettings(defaultSettings)}>恢复默认设置</button>
       </Section>

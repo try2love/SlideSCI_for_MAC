@@ -70,7 +70,15 @@ function applyShapeTextStyle(shape: OfficeShape, style: TextStyle): void {
 
 function applyShapeStyle(shape: OfficeShape, style: TextStyle): void {
   if (style.fillColor && shape.fill) {
-    shape.fill.color = normalizeHex(style.fillColor);
+    if (typeof shape.fill.setSolidColor === "function") {
+      shape.fill.setSolidColor(normalizeHex(style.fillColor));
+    } else {
+      shape.fill.color = normalizeHex(style.fillColor);
+      shape.fill.transparency = 0;
+    }
+    if ("visible" in shape.fill) {
+      shape.fill.visible = true;
+    }
   }
   if (style.borderColor && shape.lineFormat) {
     shape.lineFormat.color = normalizeHex(style.borderColor);

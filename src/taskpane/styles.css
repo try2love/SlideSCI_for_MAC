@@ -102,10 +102,29 @@ button.secondary {
   background: #e0e8f9;
 }
 
+button.copyButton {
+  background: #1f6feb;
+}
+
+button.pasteButton {
+  background: #2f9e44;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+.toolRows {
+  display: grid;
+  gap: 8px;
+}
+
+.toolRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .check {
