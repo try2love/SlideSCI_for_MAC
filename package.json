@@ -1,0 +1,29 @@
+{
+  "name": "slidesci-for-mac",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SlideSCI Office.js PowerPoint add-in for macOS.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -p tsconfig.json && vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.0.0",
+    "@vitejs/plugin-basic-ssl": "^2.0.0",
+    "mathjax-full": "^3.2.2",
+    "marked": "^16.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "vite": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/office-js": "^1.0.589",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}
