@@ -1,4 +1,4 @@
-import type { Box, ShapeLayout, SlideShape, TextStyle } from "../lib/types";
+import type { Box, ShapeLayout, SlideShape, TextRun, TextStyle } from "../lib/types";
 
 type OfficeShape = Record<string, any>;
 
@@ -51,6 +51,15 @@ function applyShapeTextStyle(shape: OfficeShape, style: TextStyle): void {
     }
     if (typeof style.italic === "boolean") {
       textRange.font.italic = style.italic;
+    }
+    if (typeof style.underline === "boolean") {
+      textRange.font.underline = style.underline;
+    }
+    if (typeof style.subscript === "boolean") {
+      textRange.font.subscript = style.subscript;
+    }
+    if (typeof style.superscript === "boolean") {
+      textRange.font.superscript = style.superscript;
     }
   }
 
@@ -107,6 +116,72 @@ export async function addTextBox(text: string, box: Box, style: TextStyle = {}):
   });
 }
 
+function applyTextRunToRange(range: OfficeShape, run: TextRun): void {
+  if (!range?.font) {
+    return;
+  }
+  const style = run.style;
+  if (style.fontName || style.fontFamily) {
+    range.font.name = style.fontName || style.fontFamily;
+  }
+  if (style.fontSize) {
+    range.font.size = style.fontSize;
+  }
+  if (style.color) {
+    range.font.color = normalizeHex(style.color);
+  }
+  if (typeof style.bold === "boolean") {
+    range.font.bold = style.bold;
+  }
+  if (typeof style.italic === "boolean") {
+    range.font.italic = style.italic;
+  }
+  if (typeof style.underline === "boolean") {
+    range.font.underline = style.underline;
+  }
+  if (typeof style.subscript === "boolean") {
+    range.font.subscript = style.subscript;
+  }
+  if (typeof style.superscript === "boolean") {
+    range.font.superscript = style.superscript;
+  }
+}
+
+export async function applyTextRuns(shapeId: string, runs: TextRun[]): Promise<boolean> {
+  if (runs.length === 0) {
+    return true;
+  }
+
+  return withCurrentSlide(async (context, slide) => {
+    const shape = slide.shapes.getItem(shapeId);
+    const textRange = shape?.textFrame?.textRange;
+    if (!textRange?.getSubstring) {
+      return false;
+    }
+
+    for (const run of runs) {
+      if (run.length <= 0) {
+        continue;
+      }
+      const range = textRange.getSubstring(run.start, run.length);
+      applyTextRunToRange(range, run);
+    }
+    await context.sync();
+    return true;
+  });
+}
+
+export async function addRichTextBox(
+  text: string,
+  box: Box,
+  baseStyle: TextStyle = {},
+  runs: TextRun[] = [],
+): Promise<string> {
+  const shapeId = await addTextBox(text, box, baseStyle);
+  await applyTextRuns(shapeId, runs);
+  return shapeId;
+}
+
 export async function addSvgPicture(svg: string, box: Box): Promise<string> {
   return withCurrentSlide(async (context, slide) => {
     if (!slide.shapes?.addPicture) {
@@ -156,6 +231,24 @@ export async function updateShapesLayout(layouts: ShapeLayout[]): Promise<void> 
   });
 }
 
+export async function updateTextForShapes(
+  updates: Array<{ id: string; text: string; style?: TextStyle }>,
+): Promise<void> {
+  await withCurrentSlide(async (context, slide) => {
+    for (const update of updates) {
+      const shape = slide.shapes.getItem(update.id);
+      if (!shape?.textFrame?.textRange) {
+        continue;
+      }
+      shape.textFrame.textRange.text = update.text;
+      if (update.style) {
+        applyShapeStyle(shape, update.style);
+      }
+    }
+    await context.sync();
+  });
+}
+
 export async function selectShapes(ids: string[]): Promise<void> {
   if (ids.length === 0) {
     return;
@@ -167,6 +260,60 @@ export async function selectShapes(ids: string[]): Promise<void> {
       if (shape?.select) {
         shape.select();
       }
+    }
+    await context.sync();
+  });
+}
+
+export interface CopiedShapeStyle {
+  text?: TextStyle;
+  fillColor?: string;
+  borderColor?: string;
+}
+
+export async function getSelectedShapeStyle(): Promise<CopiedShapeStyle> {
+  const PowerPointApi = ensurePowerPoint();
+  return PowerPointApi.run(async (context: any) => {
+    const shapes = context.presentation.getSelectedShapes();
+    shapes.load("items/id,textFrame/textRange/font,fill,lineFormat");
+    await context.sync();
+    const shape = shapes.items?.[0];
+    if (!shape) {
+      throw new Error("请先选择一个要复制格式的对象。");
+    }
+
+    const font = shape.textFrame?.textRange?.font;
+    return {
+      text: {
+        fontName: font?.name ?? undefined,
+        fontSize: font?.size ?? undefined,
+        color: font?.color ?? undefined,
+        bold: font?.bold ?? undefined,
+        italic: font?.italic ?? undefined,
+        underline: font?.underline ?? undefined,
+      },
+      fillColor: shape.fill?.color ?? undefined,
+      borderColor: shape.lineFormat?.color ?? undefined,
+    };
+  });
+}
+
+export async function applyShapeStyleToSelected(style: CopiedShapeStyle): Promise<void> {
+  const PowerPointApi = ensurePowerPoint();
+  await PowerPointApi.run(async (context: any) => {
+    const shapes = context.presentation.getSelectedShapes();
+    shapes.load("items/id");
+    await context.sync();
+    if (!shapes.items?.length) {
+      throw new Error("请先选择要粘贴格式的对象。");
+    }
+
+    for (const shape of shapes.items) {
+      applyShapeStyle(shape, {
+        ...(style.text ?? {}),
+        fillColor: style.fillColor,
+        borderColor: style.borderColor,
+      });
     }
     await context.sync();
   });

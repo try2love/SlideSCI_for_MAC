@@ -39,4 +39,17 @@ export interface TextStyle {
   italic?: boolean;
   align?: "left" | "center";
   fontFamily?: string;
+  underline?: boolean;
+  subscript?: boolean;
+  superscript?: boolean;
+}
+
+export interface TextRunStyle extends TextStyle {
+  tokenType?: string;
+}
+
+export interface TextRun {
+  start: number;
+  length: number;
+  style: TextRunStyle;
 }

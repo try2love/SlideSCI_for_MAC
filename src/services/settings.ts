@@ -1,5 +1,5 @@
 import type { LabelTemplate } from "../lib/labels";
-import type { LayoutMode, SortMode } from "../lib/types";
+import type { LayoutMode, SortMode, TextStyle } from "../lib/types";
 
 const PREFIX = "slidesci_for_mac:";
 
@@ -78,6 +78,11 @@ export interface ClipboardState {
   width?: number;
   height?: number;
   centers?: Array<{ left: number; top: number }>;
+  style?: {
+    text?: TextStyle;
+    fillColor?: string;
+    borderColor?: string;
+  };
 }
 
 export function loadClipboardState(): ClipboardState {
@@ -97,4 +102,29 @@ export function loadClipboardState(): ClipboardState {
 
 export function saveClipboardState(state: ClipboardState): void {
   localStorage.setItem(`${PREFIX}clipboard`, JSON.stringify(state));
+}
+
+export function loadLatexShapeMap(): Record<string, string> {
+  if (typeof localStorage === "undefined") {
+    return {};
+  }
+  const raw = localStorage.getItem(`${PREFIX}latex-shapes`);
+  if (!raw) {
+    return {};
+  }
+  try {
+    return JSON.parse(raw) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+export function saveLatexForShape(shapeId: string, latex: string): void {
+  const current = loadLatexShapeMap();
+  current[shapeId] = latex;
+  localStorage.setItem(`${PREFIX}latex-shapes`, JSON.stringify(current));
+}
+
+export function getLatexForShape(shapeId: string): string | undefined {
+  return loadLatexShapeMap()[shapeId];
 }

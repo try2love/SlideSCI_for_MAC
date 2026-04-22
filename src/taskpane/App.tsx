@@ -4,21 +4,27 @@ import { LABEL_TEMPLATES } from "../lib/labels";
 import { generateLabels } from "../lib/labels";
 import { parseLengthToPt } from "../lib/units";
 import type { LayoutMode, SortMode, TitlePlacement } from "../lib/types";
-import { getCodeBlockStyle, CODE_LANGUAGES } from "../services/codeBlock";
+import { getCodeBlockStyle, getCodeHighlightRuns, CODE_LANGUAGES } from "../services/codeBlock";
 import { convertLatexToSvg } from "../services/latexSvg";
-import { splitMarkdownIntoSegments } from "../services/markdown";
+import { markdownToRichBlocks } from "../services/markdown";
 import {
+  addRichTextBox,
   addSvgPicture,
   addTable,
   addTextBox,
+  applyShapeStyleToSelected,
+  getSelectedShapeStyle,
   getSelectedShapes,
   selectShapes,
+  updateTextForShapes,
   updateShapesLayout,
 } from "../services/powerpoint";
 import {
   defaultSettings,
   loadClipboardState,
+  getLatexForShape,
   loadSettings,
+  saveLatexForShape,
   saveClipboardState,
   saveSettings,
   type AppSettings,
@@ -172,53 +178,65 @@ export function App() {
     if (!code.trim()) {
       throw new Error("请输入代码内容。");
     }
-    await addTextBox(
+    await addRichTextBox(
       code.trim(),
       { left: 80, top: 80, width: 500, height: 220 },
       getCodeBlockStyle(settings.codeDarkBackground),
+      getCodeHighlightRuns(code.trim(), settings.codeLanguage, settings.codeDarkBackground),
     );
   }
 
   async function insertLatexSvg(): Promise<void> {
     const svg = convertLatexToSvg(latex);
-    await addSvgPicture(svg, { left: 160, top: 120, width: 360, height: 120 });
+    const shapeId = await addSvgPicture(svg, { left: 160, top: 120, width: 360, height: 120 });
+    saveLatexForShape(shapeId, latex);
+  }
+
+  async function loadLatexFromSelection(): Promise<void> {
+    const shapes = await getSelectedShapes();
+    if (shapes.length === 0) {
+      throw new Error("请先选择一个由 SlideSCI 插入的 LaTeX SVG。");
+    }
+    const source = getLatexForShape(shapes[0].id);
+    if (!source) {
+      throw new Error("没有找到该对象对应的 LaTeX 记录。请确认它是在当前浏览器缓存中由本插件插入的。");
+    }
+    setLatex(source);
   }
 
   async function insertMarkdown(): Promise<void> {
-    const segments = splitMarkdownIntoSegments(markdown);
-    if (segments.length === 0) {
+    const blocks = markdownToRichBlocks(markdown);
+    if (blocks.length === 0) {
       throw new Error("请输入 Markdown 内容。");
     }
 
     let top = 80;
     const left = 80;
-    for (const segment of segments) {
-      if (segment.kind === "code") {
-        await addTextBox(segment.content, { left, top, width: 500, height: 180 }, getCodeBlockStyle(settings.codeDarkBackground));
+    for (const block of blocks) {
+      if (block.kind === "code") {
+        await addRichTextBox(
+          block.content,
+          { left, top, width: 500, height: 180 },
+          getCodeBlockStyle(settings.codeDarkBackground),
+          getCodeHighlightRuns(block.content, block.language, settings.codeDarkBackground),
+        );
         top += 190;
-      } else if (segment.kind === "table") {
-        await addTable(segment.rows, { left, top, width: 500, height: Math.max(80, segment.rows.length * 28) });
-        top += Math.max(90, segment.rows.length * 32);
-      } else if (segment.kind === "math") {
-        const svg = convertLatexToSvg(segment.content);
-        await addSvgPicture(svg, { left, top, width: 420, height: 120 });
+      } else if (block.kind === "table") {
+        await addTable(block.rows, { left, top, width: 500, height: Math.max(80, block.rows.length * 28) });
+        top += Math.max(90, block.rows.length * 32);
+      } else if (block.kind === "math") {
+        const svg = convertLatexToSvg(block.content);
+        const shapeId = await addSvgPicture(svg, { left, top, width: 420, height: 120 });
+        saveLatexForShape(shapeId, block.content);
         top += 130;
-      } else if (segment.kind === "quote") {
-        await addTextBox(segment.content, { left, top, width: 500, height: 90 }, {
-          fontName: "微软雅黑",
-          fontSize: 14,
-          color: "#000000",
-          fillColor: "#ffffff",
-          borderColor: "#000000",
-        });
-        top += 100;
       } else {
-        await addTextBox(segment.content, { left, top, width: 500, height: 120 }, {
-          fontName: "微软雅黑",
-          fontSize: 14,
-          color: "#000000",
-        });
-        top += 130;
+        await addRichTextBox(
+          block.text,
+          { left, top, width: 500, height: block.role === "heading" ? 70 : 120 },
+          block.style,
+          block.runs,
+        );
+        top += block.role === "heading" ? 80 : block.role === "quote" ? 100 : 130;
       }
     }
   }
@@ -254,6 +272,43 @@ export function App() {
         top: clipboard.centers![index].top - shape.height / 2,
       })),
     );
+  }
+
+  async function updateLabels(): Promise<void> {
+    const shapes = await getSelectedShapes();
+    if (shapes.length === 0) {
+      throw new Error("请先选择要更新的标签文本框。");
+    }
+
+    const labels = generateLabels(shapes, settings.labelTemplate, settings.labelIndex);
+    await updateTextForShapes(
+      labels.map((item) => ({
+        id: item.shape.id,
+        text: item.label,
+        style: {
+          fontName: settings.labelFontName,
+          fontSize: settings.labelFontSize,
+          color: "#000000",
+          bold: settings.labelBold,
+        },
+      })),
+    );
+    if (settings.labelAutoUpdate) {
+      updateSetting("labelIndex", settings.labelIndex + labels.length);
+    }
+  }
+
+  async function copyStyle(): Promise<void> {
+    const style = await getSelectedShapeStyle();
+    saveClipboardState({ ...loadClipboardState(), style });
+  }
+
+  async function pasteStyle(): Promise<void> {
+    const clipboard = loadClipboardState();
+    if (!clipboard.style) {
+      throw new Error("还没有复制格式。");
+    }
+    await applyShapeStyleToSelected(clipboard.style);
   }
 
   async function pasteWidthHeight(kind: "width" | "height" | "both"): Promise<void> {
@@ -370,7 +425,10 @@ export function App() {
         </div>
         <label className="check"><input type="checkbox" checked={settings.labelBold} onChange={(event) => updateSetting("labelBold", event.target.checked)} />加粗</label>
         <label className="check"><input type="checkbox" checked={settings.labelAutoUpdate} onChange={(event) => updateSetting("labelAutoUpdate", event.target.checked)} />编号自动更新</label>
-        <button disabled={!canRun} onClick={() => void run("添加标签", addLabels)}>添加标签</button>
+        <div className="actions">
+          <button disabled={!canRun} onClick={() => void run("添加标签", addLabels)}>添加标签</button>
+          <button disabled={!canRun} onClick={() => void run("更新标签", updateLabels)}>更新标签</button>
+        </div>
       </Section>
 
       <Section title="内容插入">
@@ -387,7 +445,10 @@ export function App() {
         <textarea value={markdown} placeholder="粘贴 Markdown" onChange={(event) => setMarkdown(event.target.value)} />
         <button disabled={!canRun} onClick={() => void run("插入 Markdown", insertMarkdown)}>插入 Markdown</button>
         <textarea value={latex} placeholder="输入 LaTeX，例如 \\frac{a}{b}" onChange={(event) => setLatex(event.target.value)} />
-        <button disabled={!canRun} onClick={() => void run("插入 LaTeX SVG", insertLatexSvg)}>插入 LaTeX SVG</button>
+        <div className="actions">
+          <button disabled={!canRun} onClick={() => void run("插入 LaTeX SVG", insertLatexSvg)}>插入 LaTeX SVG</button>
+          <button disabled={!canRun} onClick={() => void run("读取选中 LaTeX", loadLatexFromSelection)}>读取选中 LaTeX</button>
+        </div>
       </Section>
 
       <Section title="格式工具">
@@ -397,6 +458,8 @@ export function App() {
           <button disabled={!canRun} onClick={() => void run("粘贴宽度", () => pasteWidthHeight("width"))}>粘贴宽度</button>
           <button disabled={!canRun} onClick={() => void run("粘贴高度", () => pasteWidthHeight("height"))}>粘贴高度</button>
           <button disabled={!canRun} onClick={() => void run("粘贴宽高", () => pasteWidthHeight("both"))}>粘贴宽高</button>
+          <button disabled={!canRun} onClick={() => void run("复制格式", copyStyle)}>复制格式</button>
+          <button disabled={!canRun} onClick={() => void run("粘贴格式", pasteStyle)}>粘贴格式</button>
         </div>
         <button className="secondary" onClick={() => setSettings(defaultSettings)}>恢复默认设置</button>
       </Section>
