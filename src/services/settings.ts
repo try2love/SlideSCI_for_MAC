@@ -82,6 +82,7 @@ export interface ClipboardState {
     text?: TextStyle;
     fillColor?: string;
     borderColor?: string;
+    borderWeight?: number;
   };
 }
 
@@ -127,4 +128,22 @@ export function saveLatexForShape(shapeId: string, latex: string): void {
 
 export function getLatexForShape(shapeId: string): string | undefined {
   return loadLatexShapeMap()[shapeId];
+}
+
+export interface LatexMetadataSource {
+  shapeId?: string;
+  tagLatex?: string;
+  altTextDescription?: string;
+}
+
+export function resolveLatexSource(source: LatexMetadataSource, localMap: Record<string, string> = loadLatexShapeMap()): string | undefined {
+  const tagged = source.tagLatex?.trim();
+  if (tagged) {
+    return tagged;
+  }
+  const altText = source.altTextDescription?.trim();
+  if (altText) {
+    return altText;
+  }
+  return source.shapeId ? localMap[source.shapeId] : undefined;
 }

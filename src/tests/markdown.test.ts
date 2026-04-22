@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { markdownToRichBlocks, parseInlineMarkdown, splitMarkdownIntoSegments } from "../services/markdown";
+import sampleMarkdown from "../../test.md?raw";
+import {
+  markdownToRichBlocks,
+  parseInlineMarkdown,
+  parseMarkdownTable,
+  splitMarkdownDocument,
+  splitMarkdownIntoSegments,
+} from "../services/markdown";
 
 describe("splitMarkdownIntoSegments", () => {
   it("splits text, code, table, math, and quote blocks", () => {
@@ -22,6 +29,21 @@ $$
 > 引用`);
 
     expect(segments.map((segment) => segment.kind)).toEqual(["text", "code", "table", "math", "quote"]);
+  });
+
+  it("recognizes the fixed test.md special blocks in source order", () => {
+    const blocks = splitMarkdownDocument(sampleMarkdown);
+    expect(blocks.map((block) => block.kind)).toContain("markdown");
+    expect(blocks.map((block) => block.kind)).toContain("table");
+    expect(blocks.map((block) => block.kind)).toContain("math");
+    expect(blocks.map((block) => block.kind)).toContain("code");
+    expect(blocks.map((block) => block.kind)).toContain("quote");
+
+    const firstTable = blocks.find((block) => block.kind === "table");
+    const firstMath = blocks.find((block) => block.kind === "math");
+    const firstCode = blocks.find((block) => block.kind === "code");
+    expect(blocks.indexOf(firstTable!)).toBeLessThan(blocks.indexOf(firstMath!));
+    expect(blocks.indexOf(firstMath!)).toBeLessThan(blocks.indexOf(firstCode!));
   });
 });
 
@@ -53,6 +75,27 @@ $x^2$`);
     }
   });
 
+  it("creates task, unordered, ordered, table, quote, code, and math blocks from test.md", () => {
+    const blocks = markdownToRichBlocks(sampleMarkdown);
+    const roles = blocks.flatMap((block) => (block.kind === "richText" ? [block.role] : []));
+    const kinds = blocks.map((block) => block.kind);
+
+    expect(roles).toContain("heading");
+    expect(roles).toContain("list");
+    expect(roles).toContain("taskList");
+    expect(roles).toContain("orderedList");
+    expect(roles).toContain("quote");
+    expect(kinds).toContain("table");
+    expect(kinds).toContain("math");
+    expect(kinds).toContain("code");
+
+    const text = blocks.flatMap((block) => (block.kind === "richText" ? [block.text] : [])).join("\n");
+    expect(text).toContain("☑ 完成本地代理");
+    expect(text).toContain("☐ 部署 SlideSCI 插件到生产环境");
+    expect(text).toContain("• 核心框架：Python / PyTorch");
+    expect(text).toContain("1. 提交本地代码到 feature 分支。");
+  });
+
   it("creates inline style runs", () => {
     const parsed = parseInlineMarkdown("A **bold** *italic* `code` [link](https://example.com)");
     expect(parsed.text).toBe("A bold italic code link");
@@ -60,5 +103,23 @@ $x^2$`);
     expect(parsed.runs.some((run) => run.style.italic)).toBe(true);
     expect(parsed.runs.some((run) => run.style.fontName === "Consolas")).toBe(true);
     expect(parsed.runs.some((run) => run.style.underline)).toBe(true);
+  });
+
+  it("parses aligned tables and strips cell markdown", () => {
+    const rows = parseMarkdownTable(`| 模块 | 功能 | 状态 |
+| :--- | :---: | ---: |
+| **Backend** | RAG 检索逻辑 | \`OK\` |`);
+    expect(rows).toEqual([
+      ["模块", "功能", "状态"],
+      ["Backend", "RAG 检索逻辑", "OK"],
+    ]);
+  });
+
+  it("extracts block and inline math into math blocks", () => {
+    const blocks = markdownToRichBlocks(sampleMarkdown);
+    const mathBlocks = blocks.filter((block) => block.kind === "math");
+    expect(mathBlocks.length).toBeGreaterThanOrEqual(3);
+    expect(mathBlocks.some((block) => block.kind === "math" && block.content.includes("Score"))).toBe(true);
+    expect(mathBlocks.some((block) => block.kind === "math" && block.content === "\\delta")).toBe(true);
   });
 });

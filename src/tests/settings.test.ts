@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getLatexForShape, loadClipboardState, saveClipboardState, saveLatexForShape } from "../services/settings";
+import { getLatexForShape, loadClipboardState, resolveLatexSource, saveClipboardState, saveLatexForShape } from "../services/settings";
 
 describe("settings persistence helpers", () => {
   beforeEach(() => {
@@ -21,16 +21,24 @@ describe("settings persistence helpers", () => {
         text: { fontName: "Arial", fontSize: 12, bold: true },
         fillColor: "#ffffff",
         borderColor: "#000000",
+        borderWeight: 2,
       },
     });
 
     expect(loadClipboardState().style?.text?.bold).toBe(true);
     expect(loadClipboardState().style?.fillColor).toBe("#ffffff");
+    expect(loadClipboardState().style?.borderWeight).toBe(2);
   });
 
   it("stores latex source by shape id", () => {
     saveLatexForShape("shape-1", "\\frac{a}{b}");
     expect(getLatexForShape("shape-1")).toBe("\\frac{a}{b}");
+  });
+
+  it("resolves latex metadata by tags, alt text, then local storage", () => {
+    expect(resolveLatexSource({ shapeId: "shape-1", tagLatex: "x_tag", altTextDescription: "x_alt" }, { "shape-1": "x_local" })).toBe("x_tag");
+    expect(resolveLatexSource({ shapeId: "shape-1", altTextDescription: "x_alt" }, { "shape-1": "x_local" })).toBe("x_alt");
+    expect(resolveLatexSource({ shapeId: "shape-1" }, { "shape-1": "x_local" })).toBe("x_local");
   });
 
   it("keeps position and size clipboard state independent", () => {

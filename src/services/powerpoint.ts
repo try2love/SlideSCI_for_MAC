@@ -70,19 +70,27 @@ function applyShapeTextStyle(shape: OfficeShape, style: TextStyle): void {
 
 function applyShapeStyle(shape: OfficeShape, style: TextStyle): void {
   if (style.fillColor && shape.fill) {
-    if (typeof shape.fill.setSolidColor === "function") {
-      shape.fill.setSolidColor(normalizeHex(style.fillColor));
-    } else {
-      shape.fill.color = normalizeHex(style.fillColor);
-      shape.fill.transparency = 0;
-    }
-    if ("visible" in shape.fill) {
-      shape.fill.visible = true;
+    try {
+      if (typeof shape.fill.setSolidColor === "function") {
+        shape.fill.setSolidColor(normalizeHex(style.fillColor));
+      } else {
+        shape.fill.color = normalizeHex(style.fillColor);
+        shape.fill.transparency = 0;
+      }
+      if ("visible" in shape.fill) {
+        shape.fill.visible = true;
+      }
+    } catch {
+      // Some Office.js builds expose fill as read-only for selected shape proxies.
     }
   }
   if (style.borderColor && shape.lineFormat) {
-    shape.lineFormat.color = normalizeHex(style.borderColor);
-    shape.lineFormat.weight = 1;
+    try {
+      shape.lineFormat.color = normalizeHex(style.borderColor);
+      shape.lineFormat.weight = style.borderWeight ?? 1;
+    } catch {
+      // Keep applying text style even if line formatting is unavailable.
+    }
   }
   applyShapeTextStyle(shape, style);
 }
@@ -191,13 +199,36 @@ export async function addRichTextBox(
 }
 
 export async function addSvgPicture(svg: string, box: Box): Promise<string> {
+  return addBase64Picture(btoa(unescape(encodeURIComponent(svg))), box);
+}
+
+function writeLatexMetadata(shape: OfficeShape, latex?: string): void {
+  if (!latex) {
+    return;
+  }
+  try {
+    shape.altTextTitle = "SlideSCI LaTeX";
+    shape.altTextDescription = latex;
+  } catch {
+    // Alt text is best-effort across Office.js builds.
+  }
+  try {
+    if (shape.tags?.add) {
+      shape.tags.add("slidesci.latex", latex);
+    }
+  } catch {
+    // Tags are optional in older PowerPoint clients.
+  }
+}
+
+export async function addBase64Picture(base64: string, box: Box, metadata?: { latex?: string }): Promise<string> {
   return withCurrentSlide(async (context, slide) => {
     if (!slide.shapes?.addPicture) {
-      throw new Error("当前 PowerPoint 版本不支持插入 SVG 图片。");
+      throw new Error("当前 PowerPoint 版本不支持插入图片 API。");
     }
 
-    const encoded = btoa(unescape(encodeURIComponent(svg)));
-    const shape = slide.shapes.addPicture(encoded, box);
+    const shape = slide.shapes.addPicture(base64, box);
+    writeLatexMetadata(shape, metadata?.latex);
     shape.load("id");
     await context.sync();
     return String(shape.id);
@@ -209,18 +240,21 @@ export async function addTable(rows: string[][], box: Box): Promise<string> {
     if (!slide.shapes?.addTable) {
       throw new Error("当前 PowerPoint 版本不支持添加表格。");
     }
-    const shape = slide.shapes.addTable(rows.length, Math.max(...rows.map((row) => row.length)), box);
+    const columnCount = Math.max(...rows.map((row) => row.length));
+    const normalizedRows = rows.map((row) => Array.from({ length: columnCount }, (_, index) => row[index] ?? ""));
+    const shape = slide.shapes.addTable(rows.length, columnCount, {
+      ...box,
+      values: normalizedRows,
+      uniformCellProperties: {
+        borders: {
+          left: { color: "#b7b7b7", weight: 1 },
+          right: { color: "#b7b7b7", weight: 1 },
+          top: { color: "#b7b7b7", weight: 1 },
+          bottom: { color: "#b7b7b7", weight: 1 },
+        },
+      },
+    });
     shape.load("id");
-    await context.sync();
-    const table = shape.table;
-    if (table?.cells) {
-      rows.forEach((row, rowIndex) => {
-        row.forEach((cell, columnIndex) => {
-          const tableCell = table.cells.getItemAt(rowIndex, columnIndex);
-          tableCell.text = cell;
-        });
-      });
-    }
     await context.sync();
     return String(shape.id);
   });
@@ -277,13 +311,22 @@ export interface CopiedShapeStyle {
   text?: TextStyle;
   fillColor?: string;
   borderColor?: string;
+  borderWeight?: number;
+}
+
+function safeValue<T>(getter: () => T): T | undefined {
+  try {
+    return getter();
+  } catch {
+    return undefined;
+  }
 }
 
 export async function getSelectedShapeStyle(): Promise<CopiedShapeStyle> {
   const PowerPointApi = ensurePowerPoint();
   return PowerPointApi.run(async (context: any) => {
     const shapes = context.presentation.getSelectedShapes();
-    shapes.load("items/id,textFrame/textRange/font,fill,lineFormat");
+    shapes.load("items/id,textFrame/textRange/font/name,textFrame/textRange/font/size,textFrame/textRange/font/color,textFrame/textRange/font/bold,textFrame/textRange/font/italic,textFrame/textRange/font/underline,fill/color,lineFormat/color,lineFormat/weight");
     await context.sync();
     const shape = shapes.items?.[0];
     if (!shape) {
@@ -293,18 +336,21 @@ export async function getSelectedShapeStyle(): Promise<CopiedShapeStyle> {
     const font = shape.textFrame?.textRange?.font;
     return {
       text: {
-        fontName: font?.name ?? undefined,
-        fontSize: font?.size ?? undefined,
-        color: font?.color ?? undefined,
-        bold: font?.bold ?? undefined,
-        italic: font?.italic ?? undefined,
-        underline: font?.underline ?? undefined,
+        fontName: safeValue(() => font?.name),
+        fontSize: safeValue(() => font?.size),
+        color: normalizeHex(safeValue(() => font?.color)),
+        bold: safeValue(() => font?.bold),
+        italic: safeValue(() => font?.italic),
+        underline: safeValue(() => font?.underline),
       },
-      fillColor: shape.fill?.color ?? undefined,
-      borderColor: shape.lineFormat?.color ?? undefined,
+      fillColor: normalizeHex(safeValue(() => shape.fill?.color)),
+      borderColor: normalizeHex(safeValue(() => shape.lineFormat?.color)),
+      borderWeight: safeValue(() => shape.lineFormat?.weight),
     };
   });
 }
+
+export const copySelectedFormat = getSelectedShapeStyle;
 
 export async function applyShapeStyleToSelected(style: CopiedShapeStyle): Promise<void> {
   const PowerPointApi = ensurePowerPoint();
@@ -317,12 +363,56 @@ export async function applyShapeStyleToSelected(style: CopiedShapeStyle): Promis
     }
 
     for (const shape of shapes.items) {
-      applyShapeStyle(shape, {
-        ...(style.text ?? {}),
-        fillColor: style.fillColor,
-        borderColor: style.borderColor,
-      });
+      try {
+        applyShapeStyle(shape, {
+          ...(style.text ?? {}),
+          fillColor: style.fillColor,
+          borderColor: style.borderColor,
+          borderWeight: style.borderWeight,
+        });
+        await context.sync();
+      } catch {
+        // Continue with remaining selected shapes; unsupported properties are handled best-effort.
+      }
     }
+  });
+}
+
+export interface SelectedLatexMetadata {
+  shapeId: string;
+  tagLatex?: string;
+  altTextDescription?: string;
+}
+
+export async function getSelectedLatexMetadata(): Promise<SelectedLatexMetadata> {
+  const PowerPointApi = ensurePowerPoint();
+  return PowerPointApi.run(async (context: any) => {
+    const shapes = context.presentation.getSelectedShapes();
+    shapes.load("items/id,altTextDescription,tags");
     await context.sync();
+    const shape = shapes.items?.[0];
+    if (!shape) {
+      throw new Error("请先选择一个由 SlideSCI 插入的 LaTeX 图片。");
+    }
+
+    let tagLatex: string | undefined;
+    try {
+      const tag = shape.tags?.getItemOrNullObject?.("slidesci.latex");
+      if (tag?.load) {
+        tag.load("value");
+        await context.sync();
+        if (!tag.isNullObject) {
+          tagLatex = tag.value;
+        }
+      }
+    } catch {
+      tagLatex = undefined;
+    }
+
+    return {
+      shapeId: String(shape.id),
+      tagLatex,
+      altTextDescription: safeValue(() => shape.altTextDescription),
+    };
   });
 }

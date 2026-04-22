@@ -6,15 +6,16 @@ import { estimateTextBoxSize, mergeRichTextBlocks } from "../lib/textMetrics";
 import { parseLengthToPt } from "../lib/units";
 import type { LayoutMode, SortMode, TitlePlacement } from "../lib/types";
 import { getCodeBlockStyle, getCodeHighlightRuns, CODE_LANGUAGES } from "../services/codeBlock";
-import { convertLatexToSvg } from "../services/latexSvg";
+import { convertLatexToPngBase64 } from "../services/latexSvg";
 import { markdownToRichBlocks } from "../services/markdown";
 import {
+  addBase64Picture,
   addRichTextBox,
-  addSvgPicture,
   addTable,
   addTextBox,
   applyShapeStyleToSelected,
-  getSelectedShapeStyle,
+  copySelectedFormat,
+  getSelectedLatexMetadata,
   getSelectedShapes,
   selectShapes,
   updateTextForShapes,
@@ -23,8 +24,8 @@ import {
 import {
   defaultSettings,
   loadClipboardState,
-  getLatexForShape,
   loadSettings,
+  resolveLatexSource,
   saveLatexForShape,
   saveClipboardState,
   saveSettings,
@@ -189,19 +190,18 @@ export function App() {
   }
 
   async function insertLatexSvg(): Promise<void> {
-    const svg = convertLatexToSvg(latex);
-    const shapeId = await addSvgPicture(svg, { left: 160, top: 120, width: 360, height: 120 });
-    saveLatexForShape(shapeId, latex);
+    const image = await convertLatexToPngBase64(latex);
+    const width = Math.min(520, Math.max(120, image.width * 0.75));
+    const height = Math.min(180, Math.max(48, image.height * 0.75));
+    const shapeId = await addBase64Picture(image.base64, { left: 160, top: 120, width, height }, { latex: image.latex });
+    saveLatexForShape(shapeId, image.latex);
   }
 
   async function loadLatexFromSelection(): Promise<void> {
-    const shapes = await getSelectedShapes();
-    if (shapes.length === 0) {
-      throw new Error("请先选择一个由 SlideSCI 插入的 LaTeX SVG。");
-    }
-    const source = getLatexForShape(shapes[0].id);
+    const metadata = await getSelectedLatexMetadata();
+    const source = resolveLatexSource(metadata);
     if (!source) {
-      throw new Error("没有找到该对象对应的 LaTeX 记录。请确认它是在当前浏览器缓存中由本插件插入的。");
+      throw new Error("没有找到该对象对应的 LaTeX 记录。请确认它是由本插件插入的公式图片。");
     }
     setLatex(source);
   }
@@ -230,10 +230,12 @@ export function App() {
         await addTable(block.rows, { left, top, width: tableWidth, height: tableHeight });
         top += tableHeight + 12;
       } else if (block.kind === "math") {
-        const svg = convertLatexToSvg(block.content);
-        const shapeId = await addSvgPicture(svg, { left, top, width: 420, height: 120 });
-        saveLatexForShape(shapeId, block.content);
-        top += 130;
+        const image = await convertLatexToPngBase64(block.content);
+        const width = Math.min(520, Math.max(120, image.width * 0.75));
+        const height = Math.min(180, Math.max(48, image.height * 0.75));
+        const shapeId = await addBase64Picture(image.base64, { left, top, width, height }, { latex: image.latex });
+        saveLatexForShape(shapeId, image.latex);
+        top += height + 12;
       } else if (block.kind === "mergedRichText") {
         const boxSize = estimateTextBoxSize(block.text, { fontSize: block.fontSize, monospace: false });
         await addRichTextBox(
@@ -320,7 +322,7 @@ export function App() {
   }
 
   async function copyStyle(): Promise<void> {
-    const style = await getSelectedShapeStyle();
+    const style = await copySelectedFormat();
     saveClipboardState({ ...loadClipboardState(), style });
   }
 

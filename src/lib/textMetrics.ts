@@ -66,7 +66,7 @@ function blockSpacing(block: MarkdownRichBlock): number {
   if (block.role === "heading") {
     return 10;
   }
-  if (block.role === "list") {
+  if (block.role === "list" || block.role === "orderedList" || block.role === "taskList") {
     return 4;
   }
   return 8;

@@ -35,6 +35,7 @@ export interface TextStyle {
   color?: string;
   fillColor?: string;
   borderColor?: string;
+  borderWeight?: number;
   bold?: boolean;
   italic?: boolean;
   align?: "left" | "center";
