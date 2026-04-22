@@ -132,6 +132,7 @@ export function getLatexForShape(shapeId: string): string | undefined {
 
 export interface LatexMetadataSource {
   shapeId?: string;
+  shapeName?: string;
   tagLatex?: string;
   altTextDescription?: string;
 }
@@ -144,6 +145,9 @@ export function resolveLatexSource(source: LatexMetadataSource, localMap: Record
   const altText = source.altTextDescription?.trim();
   if (altText) {
     return altText;
+  }
+  if (source.shapeName && localMap[source.shapeName]) {
+    return localMap[source.shapeName];
   }
   return source.shapeId ? localMap[source.shapeId] : undefined;
 }

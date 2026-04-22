@@ -38,6 +38,7 @@ describe("settings persistence helpers", () => {
   it("resolves latex metadata by tags, alt text, then local storage", () => {
     expect(resolveLatexSource({ shapeId: "shape-1", tagLatex: "x_tag", altTextDescription: "x_alt" }, { "shape-1": "x_local" })).toBe("x_tag");
     expect(resolveLatexSource({ shapeId: "shape-1", altTextDescription: "x_alt" }, { "shape-1": "x_local" })).toBe("x_alt");
+    expect(resolveLatexSource({ shapeId: "office-id", shapeName: "helper-name" }, { "helper-name": "x_name", "office-id": "x_local" })).toBe("x_name");
     expect(resolveLatexSource({ shapeId: "shape-1" }, { "shape-1": "x_local" })).toBe("x_local");
   });
 

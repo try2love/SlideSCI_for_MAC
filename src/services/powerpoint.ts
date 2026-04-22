@@ -367,24 +367,80 @@ export async function addTable(rows: string[][], box: Box): Promise<string> {
 }
 
 function normalizeTableRows(rows: string[][]): string[][] {
+  if (rows.length === 0) {
+    return [[""]];
+  }
   const columnCount = Math.max(...rows.map((row) => row.length));
   return rows.map((row) => Array.from({ length: columnCount }, (_, index) => row[index] ?? ""));
 }
 
-async function addNativeTable(rows: string[][], box: Box): Promise<TableInsertResult> {
+function tableBoxOptions(box: Box): Record<string, number> {
+  return {
+    left: Math.round(box.left),
+    top: Math.round(box.top),
+    width: Math.max(1, Math.round(box.width)),
+    height: Math.max(1, Math.round(box.height)),
+  };
+}
+
+async function fillNativeTableCells(context: any, shape: OfficeShape, rows: string[][]): Promise<void> {
+  if (typeof shape.getTable !== "function") {
+    throw new Error("shape.getTable 不可用");
+  }
+  const table = shape.getTable();
+  if (typeof table?.getCellOrNullObject !== "function") {
+    throw new Error("table.getCellOrNullObject 不可用");
+  }
+
+  for (const [rowIndex, row] of rows.entries()) {
+    for (const [columnIndex, value] of row.entries()) {
+      const cell = table.getCellOrNullObject(rowIndex, columnIndex);
+      cell.text = value;
+    }
+  }
+  await context.sync();
+}
+
+async function deleteShapeBestEffort(context: any, shape: OfficeShape): Promise<void> {
+  try {
+    if (typeof shape.delete === "function") {
+      shape.delete();
+      await context.sync();
+    }
+  } catch {
+    // If cleanup is unavailable, leave the native error for the caller.
+  }
+}
+
+export async function addNativeTableByCells(rows: string[][], box: Box): Promise<TableInsertResult> {
   return withCurrentSlide(async (context, slide) => {
     if (typeof slide.shapes?.addTable !== "function") {
       throw new Error("addTable 不可用");
     }
     const normalizedRows = normalizeTableRows(rows);
     const columnCount = normalizedRows[0]?.length ?? 0;
-    const shape = slide.shapes.addTable(rows.length, columnCount, {
-      left: Math.round(box.left),
-      top: Math.round(box.top),
-      width: Math.max(1, Math.round(box.width)),
-      height: Math.max(1, Math.round(box.height)),
-      values: normalizedRows,
-    });
+    const shape = slide.shapes.addTable(normalizedRows.length, columnCount, tableBoxOptions(box));
+    shape.load("id");
+    await context.sync();
+    try {
+      await fillNativeTableCells(context, shape, normalizedRows);
+    } catch (error) {
+      await deleteShapeBestEffort(context, shape);
+      throw new Error(`原生表格已创建但填值失败：${errorMessage(error)}`);
+    }
+    return { ids: [String(shape.id)], mode: "nativeTable" };
+  });
+}
+
+async function addNativeTableWithValues(rows: string[][], box: Box, includeBox: boolean): Promise<TableInsertResult> {
+  return withCurrentSlide(async (context, slide) => {
+    if (typeof slide.shapes?.addTable !== "function") {
+      throw new Error("addTable 不可用");
+    }
+    const normalizedRows = normalizeTableRows(rows);
+    const columnCount = normalizedRows[0]?.length ?? 0;
+    const options = includeBox ? { ...tableBoxOptions(box), values: normalizedRows } : { values: normalizedRows };
+    const shape = slide.shapes.addTable(normalizedRows.length, columnCount, options);
     shape.load("id");
     await context.sync();
     return { ids: [String(shape.id)], mode: "nativeTable" };
@@ -435,9 +491,21 @@ async function addTableTextGrid(rows: string[][], box: Box, priorErrors: string[
 export async function addTableWithFallback(rows: string[][], box: Box): Promise<TableInsertResult> {
   const errors: string[] = [];
   try {
-    return await addNativeTable(rows, box);
+    return await addNativeTableByCells(rows, box);
   } catch (error) {
-    errors.push(`addTable 失败：${errorMessage(error)}`);
+    errors.push(`空原生表格逐格填值失败：${errorMessage(error)}`);
+  }
+
+  try {
+    return await addNativeTableWithValues(rows, box, false);
+  } catch (error) {
+    errors.push(`原生表格 values 默认位置失败：${errorMessage(error)}`);
+  }
+
+  try {
+    return await addNativeTableWithValues(rows, box, true);
+  } catch (error) {
+    errors.push(`原生表格 values 含尺寸失败：${errorMessage(error)}`);
   }
 
   try {
@@ -569,6 +637,7 @@ export async function applyShapeStyleToSelected(style: CopiedShapeStyle): Promis
 
 export interface SelectedLatexMetadata {
   shapeId: string;
+  shapeName?: string;
   tagLatex?: string;
   altTextDescription?: string;
 }
@@ -577,7 +646,7 @@ export async function getSelectedLatexMetadata(): Promise<SelectedLatexMetadata>
   const PowerPointApi = ensurePowerPoint();
   return PowerPointApi.run(async (context: any) => {
     const shapes = context.presentation.getSelectedShapes();
-    shapes.load("items/id,altTextDescription,tags");
+    shapes.load("items/id,name,altTextDescription,tags");
     await context.sync();
     const shape = shapes.items?.[0];
     if (!shape) {
@@ -600,6 +669,7 @@ export async function getSelectedLatexMetadata(): Promise<SelectedLatexMetadata>
 
     return {
       shapeId: String(shape.id),
+      shapeName: safeValue(() => shape.name),
       tagLatex,
       altTextDescription: safeValue(() => shape.altTextDescription),
     };

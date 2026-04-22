@@ -1,7 +1,7 @@
-import type { NativeEquationRun } from "../lib/types";
-import { selectTextRange } from "./powerpoint";
+import type { Box, NativeEquationRun, TextRun, TextStyle } from "../lib/types";
 
-const HELPER_BASE_URL = "http://127.0.0.1:17926";
+const HELPER_BASE_URLS = ["http://127.0.0.1:17926", "http://localhost:17926"];
+let preferredHelperBaseUrl = HELPER_BASE_URLS[0];
 
 export interface NativeEquationHelperHealth {
   ok: boolean;
@@ -13,6 +13,8 @@ export interface NativeEquationHelperHealth {
 export interface NativeEquationConversionResponse {
   ok: boolean;
   mode: "native" | "unsupported";
+  id?: string;
+  nativeCount?: number;
   message: string;
 }
 
@@ -35,9 +37,29 @@ function messageFromError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function fetchHelper(path: string, init?: RequestInit): Promise<Response> {
+  const urls = [
+    preferredHelperBaseUrl,
+    ...HELPER_BASE_URLS.filter((url) => url !== preferredHelperBaseUrl),
+  ];
+  let lastError: unknown;
+
+  for (const baseUrl of urls) {
+    try {
+      const response = await fetch(`${baseUrl}${path}`, init);
+      preferredHelperBaseUrl = baseUrl;
+      return response;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError;
+}
+
 export async function checkNativeEquationHelper(): Promise<NativeEquationHelperHealth> {
   try {
-    const response = await fetch(`${HELPER_BASE_URL}/health`);
+    const response = await fetchHelper("/health");
     return readJsonResponse<NativeEquationHelperHealth>(response);
   } catch (error) {
     return {
@@ -49,7 +71,7 @@ export async function checkNativeEquationHelper(): Promise<NativeEquationHelperH
 }
 
 export async function convertSelectedTextToNativeEquation(latex: string, display = false): Promise<NativeEquationConversionResponse> {
-  const response = await fetch(`${HELPER_BASE_URL}/equation/convert-selection`, {
+  const response = await fetchHelper("/equation/convert-selection", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ latex, display }),
@@ -57,35 +79,56 @@ export async function convertSelectedTextToNativeEquation(latex: string, display
   return readJsonResponse<NativeEquationConversionResponse>(response);
 }
 
-export async function convertEquationRuns(
-  shapeId: string,
-  equations: NativeEquationRun[],
-  deps: {
-    selectRange?: typeof selectTextRange;
-    convertSelection?: typeof convertSelectedTextToNativeEquation;
-  } = {},
-): Promise<NativeEquationConversionSummary> {
-  const selectRange = deps.selectRange ?? selectTextRange;
-  const convertSelection = deps.convertSelection ?? convertSelectedTextToNativeEquation;
-  const summary: NativeEquationConversionSummary = { nativeCount: 0, fallbackCount: 0, messages: [] };
+export interface NativeEquationTextBoxRequest {
+  text: string;
+  equations: NativeEquationRun[];
+  box: Box;
+  baseStyle?: TextStyle;
+  runs?: TextRun[];
+}
 
-  for (const equation of [...equations].sort((a, b) => b.start - a.start)) {
-    try {
-      await selectRange(shapeId, equation.start, equation.length);
-      const result = await convertSelection(equation.latex, equation.display);
-      if (result.ok && result.mode === "native") {
-        summary.nativeCount += 1;
-      } else {
-        summary.fallbackCount += 1;
-        summary.messages.push(result.message || `公式 ${equation.latex} 未转换为原生公式。`);
-      }
-    } catch (error) {
-      summary.fallbackCount += 1;
-      summary.messages.push(`公式 ${equation.latex} 保留为文本：${messageFromError(error)}`);
-    }
+export interface NativeEquationBlockRequest {
+  latex: string;
+  box: Box;
+  style?: TextStyle;
+}
+
+async function postNativeEquation(path: string, payload: unknown): Promise<NativeEquationConversionResponse> {
+  const response = await fetchHelper(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return readJsonResponse<NativeEquationConversionResponse>(response);
+}
+
+export function ensureNativeEquationAvailable(health: NativeEquationHelperHealth): void {
+  if (!health.ok || !health.nativeEquationAvailable) {
+    throw new Error(health.message || "本地公式 helper 不可用。请先运行 npm run helper 并授权 PowerPoint 自动化。");
   }
+}
 
-  return summary;
+export async function insertNativeEquationTextBox(request: NativeEquationTextBoxRequest): Promise<NativeEquationConversionResponse> {
+  const health = await checkNativeEquationHelper();
+  ensureNativeEquationAvailable(health);
+  return postNativeEquation("/equation/insert-textbox", request);
+}
+
+export async function insertNativeEquationBlock(request: NativeEquationBlockRequest): Promise<NativeEquationConversionResponse> {
+  const health = await checkNativeEquationHelper();
+  ensureNativeEquationAvailable(health);
+  return postNativeEquation("/equation/insert-block", request);
+}
+
+export async function convertEquationRuns(
+  _shapeId: string,
+  equations: NativeEquationRun[],
+): Promise<NativeEquationConversionSummary> {
+  return {
+    nativeCount: 0,
+    fallbackCount: equations.length,
+    messages: ["当前版本不再通过 Office.js 选择文本范围转换公式；请使用 helper 插入含公式文本框。"],
+  };
 }
 
 export function formatEquationConversionSummary(summary: NativeEquationConversionSummary): string | undefined {

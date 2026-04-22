@@ -2,13 +2,14 @@ import { useMemo, useState } from "react";
 import { arrangeShapes } from "../lib/layout";
 import { LABEL_TEMPLATES } from "../lib/labels";
 import { generateLabels } from "../lib/labels";
+import { normalizeLatexInput } from "../lib/latex";
 import { estimateTextBoxSize } from "../lib/textMetrics";
 import { parseLengthToPt } from "../lib/units";
 import type { LayoutMode, SortMode, TitlePlacement } from "../lib/types";
 import { getCodeBlockStyle, getCodeHighlightRuns, CODE_LANGUAGES, CODE_LANGUAGE_LABELS } from "../services/codeBlock";
 import { convertLatexToPngBase64 } from "../services/latexSvg";
 import { formatMarkdownRenderResult, markdownToRenderBlocks, renderMarkdownBlocks } from "../services/markdownRender";
-import { checkNativeEquationHelper, convertEquationRuns, formatEquationConversionSummary } from "../services/nativeEquation";
+import { insertNativeEquationBlock, insertNativeEquationTextBox } from "../services/nativeEquation";
 import {
   addLatexImage,
   addRichTextBox,
@@ -190,14 +191,36 @@ export function App() {
     );
   }
 
-  async function insertLatexSvg(): Promise<string | void> {
+  async function insertLatexNative(): Promise<string | void> {
+    const normalizedLatex = normalizeLatexInput(latex);
+    if (!normalizedLatex) {
+      throw new Error("请输入 LaTeX 内容。");
+    }
+
+    const result = await insertNativeEquationBlock({
+      latex: normalizedLatex,
+      box: { left: 160, top: 120, width: 500, height: 120 },
+      style: {
+        fontName: "Cambria Math",
+        fontSize: 18,
+        color: "#000000",
+        align: "center",
+      },
+    });
+    if (result.id) {
+      saveLatexForShape(result.id, normalizedLatex);
+    }
+    return result.message || "插入 LaTeX 原生公式完成。";
+  }
+
+  async function insertLatexImage(): Promise<string | void> {
     const image = await convertLatexToPngBase64(latex);
     const width = Math.min(520, Math.max(120, image.width * 0.75));
     const height = Math.min(180, Math.max(48, image.height * 0.75));
     const inserted = await addLatexImage(image.base64, { left: 160, top: 120, width, height }, image.latex);
     saveLatexForShape(inserted.id, image.latex);
     if (inserted.warning) {
-      return `插入 LaTeX SVG 完成：${inserted.warning}`;
+      return `插入 LaTeX 图片完成：${inserted.warning}`;
     }
   }
 
@@ -205,7 +228,7 @@ export function App() {
     const metadata = await getSelectedLatexMetadata();
     const source = resolveLatexSource(metadata);
     if (!source) {
-      throw new Error("没有找到该对象对应的 LaTeX 记录。请确认它是由本插件插入的公式图片。");
+      throw new Error("没有找到该对象对应的 LaTeX 记录。请确认它是由本插件插入的公式。");
     }
     setLatex(source);
   }
@@ -221,9 +244,28 @@ export function App() {
     const result = await renderMarkdownBlocks(blocks, {
       text: async (block) => {
         const boxSize = estimateTextBoxSize(block.text, { fontSize: block.fontSize, monospace: false });
-        const shapeId = await addRichTextBox(
+        const box = { left, top, ...boxSize };
+        if (block.equations.length > 0) {
+          const inserted = await insertNativeEquationTextBox({
+            text: block.text,
+            equations: block.equations,
+            box,
+            baseStyle: {
+              fontName: "微软雅黑",
+              fontSize: 14,
+              color: "#000000",
+            },
+            runs: block.runs,
+          });
+          top += boxSize.height + 12;
+          if (inserted.id) {
+            saveLatexForShape(inserted.id, block.equations.map((equation) => equation.latex).join("\n"));
+          }
+          return inserted.message;
+        }
+        await addRichTextBox(
           block.text,
-          { left, top, ...boxSize },
+          box,
           {
             fontName: "微软雅黑",
             fontSize: 14,
@@ -232,26 +274,35 @@ export function App() {
           block.runs,
         );
         top += boxSize.height + 12;
-        return formatEquationConversionSummary(await convertEquationRuns(shapeId, block.equations));
       },
       quote: async (block) => {
         const boxSize = estimateTextBoxSize(block.text, { fontSize: block.style.fontSize ?? 14, monospace: false });
-        const shapeId = await addRichTextBox(
-          block.text,
-          { left, top, ...boxSize },
-          {
-            fontName: "微软雅黑",
-            fontSize: 14,
-            color: "#000000",
-            fillColor: "#ffffff",
-            borderColor: "#000000",
-            borderWeight: 1,
-            ...block.style,
-          },
-          block.runs,
-        );
+        const box = { left, top, ...boxSize };
+        const baseStyle = {
+          fontName: "微软雅黑",
+          fontSize: 14,
+          color: "#000000",
+          fillColor: "#ffffff",
+          borderColor: "#000000",
+          borderWeight: 1,
+          ...block.style,
+        };
+        if (block.equations.length > 0) {
+          const inserted = await insertNativeEquationTextBox({
+            text: block.text,
+            equations: block.equations,
+            box,
+            baseStyle,
+            runs: block.runs,
+          });
+          top += boxSize.height + 12;
+          if (inserted.id) {
+            saveLatexForShape(inserted.id, block.equations.map((equation) => equation.latex).join("\n"));
+          }
+          return inserted.message;
+        }
+        await addRichTextBox(block.text, box, baseStyle, block.runs);
         top += boxSize.height + 12;
-        return formatEquationConversionSummary(await convertEquationRuns(shapeId, block.equations));
       },
       code: async (block) => {
         const boxSize = estimateTextBoxSize(block.content, { fontSize: 12, monospace: true });
@@ -271,34 +322,23 @@ export function App() {
         return inserted.warning;
       },
       math: async (block) => {
-        const helper = await checkNativeEquationHelper();
-        if (helper.ok && helper.nativeEquationAvailable) {
-          const boxSize = estimateTextBoxSize(block.content, { fontSize: 18, monospace: false, minWidth: 220, maxWidth: 620 });
-          const shapeId = await addRichTextBox(
-            block.content,
-            { left, top, width: Math.max(360, boxSize.width), height: Math.max(54, boxSize.height) },
-            {
-              fontName: "Cambria Math",
-              fontSize: 18,
-              color: "#000000",
-              align: "center",
-            },
-            [{ start: 0, length: block.content.length, style: { fontName: "Cambria Math", color: "#7a3e9d" } }],
-          );
-          const summary = await convertEquationRuns(shapeId, [
-            { start: 0, length: block.content.length, latex: block.content, display: true },
-          ]);
-          top += Math.max(54, boxSize.height) + 12;
-          return formatEquationConversionSummary(summary);
-        }
-
-        const image = await convertLatexToPngBase64(block.content, { display: block.display });
-        const width = Math.min(520, Math.max(120, image.width * 0.75));
-        const height = Math.min(180, Math.max(48, image.height * 0.75));
-        const inserted = await addLatexImage(image.base64, { left, top, width, height }, image.latex);
-        saveLatexForShape(inserted.id, image.latex);
+        const boxSize = estimateTextBoxSize(block.content, { fontSize: 18, monospace: false, minWidth: 220, maxWidth: 620 });
+        const height = Math.max(54, boxSize.height);
+        const inserted = await insertNativeEquationBlock({
+          latex: block.content,
+          box: { left, top, width: Math.max(360, boxSize.width), height },
+          style: {
+            fontName: "Cambria Math",
+            fontSize: 18,
+            color: "#000000",
+            align: "center",
+          },
+        });
         top += height + 12;
-        return inserted.warning || `本地公式 helper 不可用，块级公式已降级为图片：${helper.message}`;
+        if (inserted.id) {
+          saveLatexForShape(inserted.id, block.content);
+        }
+        return inserted.message;
       },
     });
 
@@ -524,7 +564,8 @@ export function App() {
         <button disabled={!canRun} onClick={() => void run("插入 Markdown", insertMarkdown)}>插入 Markdown</button>
         <textarea value={latex} placeholder="输入 LaTeX，例如 \\frac{a}{b}" onChange={(event) => setLatex(event.target.value)} />
         <div className="actions">
-          <button disabled={!canRun} onClick={() => void run("插入 LaTeX SVG", insertLatexSvg)}>插入 LaTeX SVG</button>
+          <button disabled={!canRun} onClick={() => void run("插入 LaTeX 原生公式", insertLatexNative)}>插入 LaTeX 原生公式</button>
+          <button disabled={!canRun} onClick={() => void run("插入 LaTeX 图片", insertLatexImage)}>插入 LaTeX 图片</button>
           <button disabled={!canRun} onClick={() => void run("读取选中 LaTeX", loadLatexFromSelection)}>读取选中 LaTeX</button>
         </div>
       </Section>

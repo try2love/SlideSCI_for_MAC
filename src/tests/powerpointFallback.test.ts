@@ -12,6 +12,22 @@ function shape(id: string) {
   };
 }
 
+function tableShape(id: string) {
+  const cells = new Map<string, { text: string }>();
+  return {
+    ...shape(id),
+    getTable: vi.fn(() => ({
+      getCellOrNullObject: vi.fn((row: number, column: number) => {
+        const key = `${row}:${column}`;
+        const cell = cells.get(key) ?? { text: "" };
+        cells.set(key, cell);
+        return cell;
+      }),
+    })),
+    cells,
+  };
+}
+
 function installPowerPointMock(shapes: Record<string, unknown>) {
   const context = {
     sync: vi.fn(async () => undefined),
@@ -90,8 +106,8 @@ describe("PowerPoint fallback helpers", () => {
     expect(result.warning).toContain("已降级为文本框网格");
   });
 
-  it("creates native tables with minimal addTable options", async () => {
-    const table = shape("native-table");
+  it("creates native tables by first adding an empty table and then filling cells", async () => {
+    const table = tableShape("native-table");
     const addTable = vi.fn(() => table);
     installPowerPointMock({ addTable });
 
@@ -109,15 +125,14 @@ describe("PowerPoint fallback helpers", () => {
       top: 21,
       width: 200,
       height: 80,
-      values: [
-        ["A", "B"],
-        ["1", "2"],
-      ],
     });
     const firstCall = addTable.mock.calls[0] as unknown as [number, number, Record<string, unknown>];
     const options = firstCall[2];
+    expect(options).not.toHaveProperty("values");
     expect(options).not.toHaveProperty("uniformCellProperties");
     expect(options).not.toHaveProperty("borders");
     expect(options).not.toHaveProperty("margins");
+    expect(table.cells.get("0:0")?.text).toBe("A");
+    expect(table.cells.get("1:1")?.text).toBe("2");
   });
 });
