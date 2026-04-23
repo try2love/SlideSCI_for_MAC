@@ -6,12 +6,13 @@
 
 ```bash
 npm install
+npm run manifest:dev
 npm run dev
 ```
 
 默认开发地址是 `https://localhost:3000`。第一次运行时，先在 Safari 打开 `https://localhost:3000` 并信任本地开发证书，否则 PowerPoint 可能无法打开任务窗格。
 
-如果要使用 Markdown 行内公式、块级公式或“插入 LaTeX 原生公式”，另开一个终端运行：
+开发模式下，如果要使用 Markdown 行内公式、块级公式或“插入 LaTeX 原生公式”，另开一个终端运行：
 
 ```bash
 npm run helper
@@ -19,13 +20,43 @@ npm run helper
 
 helper 监听 `http://127.0.0.1:17926`，负责通过 PowerPoint 自动化创建原生公式文本框。首次使用时 macOS 可能要求允许终端或 Node 自动化控制 Microsoft PowerPoint；如果拒绝，含公式模块会失败并在状态栏显示原因，不会静默降级成图片。
 
+## 安装给最终用户
+
+推荐安装方式：
+
+```bash
+npm run build
+npm run install:mac
+```
+
+安装脚本会完成这些动作：
+
+1. 编译本地 `SlideSCICompanion` watcher。
+2. 复制 helper 到 `~/Library/Application Support/SlideSCI/`。
+3. 注册 `launchd` 用户级 LaunchAgent，让 companion 常驻监听 PowerPoint 进程。
+4. 渲染并复制 `manifest.xml` 到 PowerPoint 的 `wef` 侧载目录。
+
+安装完成后，完全退出并重启 PowerPoint。此后：
+
+- PowerPoint 打开时，companion 会自动拉起本地 helper。
+- PowerPoint 关闭后，helper 会在短暂宽限期后自动退出。
+- `SlideSCI` 入口位于“视图”选项卡右侧。
+
+如需卸载：
+
+```bash
+npm run uninstall:mac
+```
+
+当前安装脚本仍要求本机存在 `node` 以运行 helper；仓库里已经加入了 companion/installer 基础设施，后续可继续把 helper 打包成独立可执行文件，去掉这个依赖。
+
 Mac PowerPoint 本地侧载传统 XML manifest：
 
 ```text
 ~/Library/Containers/com.microsoft.Powerpoint/Data/Documents/wef
 ```
 
-把 `manifest.xml` 放入该目录后完全退出并重启 PowerPoint。加载成功后，会在“开始”选项卡出现 `SlideSCI` 分组和“打开 SlideSCI”按钮；也可以从“加载项”入口查找 `SlideSCI for Mac`。
+把 `manifest.xml` 放入该目录后完全退出并重启 PowerPoint。加载成功后，会在“视图”选项卡出现 `SlideSCI` 分组和“打开 SlideSCI”按钮；也可以从“加载项”入口查找 `SlideSCI for Mac`。
 
 如果加载项不出现：
 

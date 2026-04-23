@@ -7,6 +7,10 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "helper": "node scripts/native-equation-helper.mjs",
+    "manifest:dev": "node scripts/render-manifest.mjs https://localhost:3000",
+    "companion:build": "bash scripts/build-companion.sh",
+    "install:mac": "bash scripts/install-slidesci-mac.sh",
+    "uninstall:mac": "bash scripts/uninstall-slidesci-mac.sh",
     "build": "tsc -p tsconfig.json && vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"

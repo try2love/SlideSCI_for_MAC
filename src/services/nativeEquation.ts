@@ -79,7 +79,7 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
   try {
     data = text ? JSON.parse(text) : {};
   } catch {
-    throw new Error(`helper 返回了非 JSON 响应（HTTP ${response.status}）。请确认 npm run helper 正在运行，且 Vite /native-helper 代理已生效。`);
+    throw new Error(`helper 返回了非 JSON 响应（HTTP ${response.status}）。请确认 SlideSCI companion/helper 已安装并运行，且 /native-helper 代理或 127.0.0.1:17926 可访问。`);
   }
   if (!response.ok) {
     const buildSuffix = data.helperBuildId ? ` [helper build ${data.helperBuildId}]` : "";
@@ -91,7 +91,7 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
 function messageFromError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   if (/load failed|failed to fetch|networkerror|network request failed/i.test(message)) {
-    return "任务窗格无法访问本地公式 helper。请确认已运行 npm run helper，Vite 开发服务已重启以启用 /native-helper 代理，并允许本机 17926 端口访问。";
+    return "任务窗格无法访问本地公式 helper。请确认 SlideSCI companion/helper 已安装并运行，或在开发模式下已启动 npm run helper，并允许本机 17926 端口访问。";
   }
   return message;
 }
@@ -205,7 +205,7 @@ async function postNativeEquation(path: string, payload: unknown): Promise<Nativ
 export function ensureNativeEquationAvailable(health: NativeEquationHelperHealth): void {
   if (!health.ok || !health.nativeEquationAvailable) {
     const buildSuffix = health.helperBuildId ? ` [helper build ${health.helperBuildId}]` : "";
-    throw new Error((health.message || "本地公式 helper 不可用。请先运行 npm run helper 并授权 PowerPoint 自动化。") + buildSuffix);
+    throw new Error((health.message || "本地公式 helper 不可用。请确认 SlideSCI companion/helper 已安装并授权 PowerPoint 自动化。开发模式下也可以手动运行 npm run helper。") + buildSuffix);
   }
 }
 
