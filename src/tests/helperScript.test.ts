@@ -35,7 +35,7 @@ describe("native equation helper script exports", () => {
     const syntaxProbeScript = helper.buildSyntaxProbeScript();
     const shapeRangesScript = helper.buildConvertShapeRangesScript({
       placeholders: [{ start: 3, length: 6, latex: "\\delta", unicodeMath: "δ" }],
-      strategyOrder: ["latex-ribbon"],
+      strategyOrder: ["equation-insert"],
     });
     expect(helper.SCRIPT_EXECUTION_MODE).toBe("temp-file");
     expect(helper.HELPER_BUILD_ID).toMatch(/^[0-9a-f]{12}$/);
@@ -44,14 +44,20 @@ describe("native equation helper script exports", () => {
     expect(syntaxProbeScript).not.toContain("do Visual Basic");
     expect(shapeRangesScript).not.toContain("do Visual Basic");
     expect(convertScript).toContain("System Events");
-    expect(convertScript).toContain("LaTeX 转数学公式");
-    expect(convertScript).toContain("Convert");
-    expect(convertScript).toContain("Professional");
-    expect(convertScript).toContain("on tryLatexRibbonConvert(processName)");
-    expect(convertScript).toContain("on tryProfessionalLayout(processName)");
-    expect(convertScript).toContain('error "latex-convert: 未能自动点击');
-    expect(convertScript).toContain('error "professional-layout: 未能自动切换为 Professional');
-    expect(convertScript).toContain("return \"latex-ribbon\"");
+    expect(convertScript).toContain("Insert");
+    expect(convertScript).toContain("Equation");
+    expect(convertScript).toContain("on tryInsertEquation(processName, menuCandidates, itemCandidates)");
+    expect(convertScript).toContain("on replaceRangeAndConvert(processName, startIndex, lengthValue, latexText)");
+    expect(convertScript).not.toContain("LaTeX 转数学公式");
+    expect(convertScript).not.toContain("Professional");
+    expect(convertScript).not.toContain("Equation Options");
+    expect(convertScript).not.toContain("公式选项");
+    expect(convertScript).not.toContain("on isPressableElement(uiElement)");
+    expect(convertScript).not.toContain("on tryLatexRibbonConvert(");
+    expect(convertScript).not.toContain("on tryProfessionalLayout(");
+    expect(convertScript).not.toContain("“");
+    expect(convertScript).not.toContain("”");
+    expect(convertScript).toContain("return \"equation-insert\"");
     expect(convertScript).toContain('keystroke "=" using {option down}');
     expect(convertScript).not.toContain('keystroke "=" using {control down}');
     expect(convertScript).toContain('error (prefixText & errMsg) number errNum');
@@ -60,7 +66,7 @@ describe("native equation helper script exports", () => {
     expect(convertScript).not.toContain("AXSelectedTextRange=no:");
     expect(convertScript).not.toContain("encodeConversionResult");
     expect(convertScript).not.toMatch(/error\s+"[^"]*"\s*&\s*.*number\s+errNum/);
-    expect(syntaxProbeScript).toContain("return \"latex-ribbon\"");
+    expect(syntaxProbeScript).toContain("return \"equation-insert\"");
     expect(shapeRangesScript).toContain("AXSelectedTextRange");
     expect(helper.HELPER_ENDPOINTS).toContain("POST /equation/convert-selection");
     expect(helper.HELPER_ENDPOINTS).toContain("POST /equation/convert-shape-ranges");
@@ -90,9 +96,22 @@ describe("native equation helper script exports", () => {
       helper.buildConvertSelectionScript({
         latex: "\\boldsymbol{\\theta}_u(t)\\in\\mathbb{R}^{d_e}",
         unicodeMath: "θ_u(t)∈ℝ^(d_e)",
-        strategyOrder: ["latex-ribbon"],
+        strategyOrder: ["equation-insert"],
       }),
       "selection-latex",
+    );
+  });
+
+  it.skipIf(!HAS_OSACOMPILE)("compiles shape-range conversion scripts with placeholder replacement", async () => {
+    // @ts-expect-error The helper is a Node .mjs script outside the TS source tree.
+    const helper = await import("../../scripts/native-equation-helper.mjs");
+
+    await expectAppleScriptToCompile(
+      helper.buildConvertShapeRangesScript({
+        placeholders: [{ start: 3, length: 6, latex: "\\delta", unicodeMath: "δ" }],
+        strategyOrder: ["equation-insert"],
+      }),
+      "shape-ranges-latex",
     );
   });
 });

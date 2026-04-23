@@ -19,17 +19,17 @@ describe("native equation helper client", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ ok: true, helperBuildId: "abc123def456", scriptExecutionMode: "temp-file", equationScriptSyntaxOk: true, powerpointRunning: true, nativeEquationAvailable: true, message: "ok" }))
-      .mockResolvedValueOnce(jsonResponse({ ok: true, mode: "native", nativeCount: 1, strategyUsed: "latex-ribbon", message: "done" }));
+      .mockResolvedValueOnce(jsonResponse({ ok: true, mode: "native", nativeCount: 1, strategyUsed: "equation-insert", message: "done" }));
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await nativeEquation.convertSelectedTextToNativeEquation("\\delta");
 
     expect(result.mode).toBe("native");
-    expect(result.strategyUsed).toBe("latex-ribbon");
+    expect(result.strategyUsed).toBe("equation-insert");
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/native-helper/health", undefined);
     expect(fetchMock.mock.calls[1][0]).toBe("/native-helper/equation/convert-selection");
     const request = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
-    expect(request.strategyOrder).toEqual(["latex-ribbon"]);
+    expect(request.strategyOrder).toEqual(["equation-insert"]);
     expect(request.unicodeMath).toBeTruthy();
   });
 
@@ -37,7 +37,7 @@ describe("native equation helper client", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ ok: true, helperBuildId: "abc123def456", scriptExecutionMode: "temp-file", equationScriptSyntaxOk: true, powerpointRunning: true, nativeEquationAvailable: true, message: "ok" }))
-      .mockResolvedValueOnce(jsonResponse({ ok: true, mode: "native", nativeCount: 2, strategyUsed: "latex-ribbon", message: "done" }));
+      .mockResolvedValueOnce(jsonResponse({ ok: true, mode: "native", nativeCount: 2, strategyUsed: "equation-insert", message: "done" }));
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await nativeEquation.convertShapeRangesToNativeEquations({
@@ -49,13 +49,13 @@ describe("native equation helper client", () => {
         { start: 12, length: 7, latex: "\\lambda", token: "BBBBBBB" },
       ],
       mode: "inline",
-      strategyOrder: ["latex-ribbon"],
+      strategyOrder: ["equation-insert"],
     });
 
     expect(result.nativeCount).toBe(2);
     expect(fetchMock.mock.calls[1][0]).toBe("/native-helper/equation/convert-shape-ranges");
     const request = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
-    expect(request.strategyOrder).toEqual(["latex-ribbon"]);
+    expect(request.strategyOrder).toEqual(["equation-insert"]);
   });
 
   it("turns Load failed into a helper-specific diagnostic", async () => {
@@ -97,7 +97,7 @@ describe("native equation helper client", () => {
     expect(request.placeholders).toHaveLength(2);
     expect(request.placeholders[0].length).toBe(request.placeholders[0].token.length);
     expect(request.placeholders[1].length).toBe(request.placeholders[1].token.length);
-    expect(request.strategyOrder).toEqual(["latex-ribbon"]);
+    expect(request.strategyOrder).toEqual(["equation-insert"]);
     expect(request.placeholders[0].unicodeMath).toBeTruthy();
     expect(request.workingText).not.toContain("\\delta");
     expect(request.workingText).not.toContain("\\lambda");
@@ -117,7 +117,7 @@ describe("native equation helper client", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ ok: true, helperBuildId: "abc123def456", scriptExecutionMode: "temp-file", equationScriptSyntaxOk: true, powerpointRunning: true, nativeEquationAvailable: true, message: "ok" }))
-      .mockResolvedValueOnce(jsonResponse({ ok: true, mode: "native", nativeCount: 2, strategyUsed: "latex-ribbon", message: "done" }));
+      .mockResolvedValueOnce(jsonResponse({ ok: true, mode: "native", nativeCount: 2, strategyUsed: "equation-insert", message: "done" }));
     vi.stubGlobal("fetch", fetchMock);
 
     const text = "其中，\\delta 和 \\lambda。";
@@ -138,13 +138,13 @@ describe("native equation helper client", () => {
     expect(request.mode).toBe("inline");
     expect(request.workingText).toHaveLength(text.length);
     expect(request.placeholders).toHaveLength(2);
-    expect(request.strategyOrder).toEqual(["latex-ribbon"]);
+    expect(request.strategyOrder).toEqual(["equation-insert"]);
     expect(result.id).toBe("shape-2");
     expect(result.nativeCount).toBe(2);
-    expect(result.strategyUsed).toBe("latex-ribbon");
+    expect(result.strategyUsed).toBe("equation-insert");
   });
 
-  it("uses helper GUI conversion for inline equations even when text-range selection is available", async () => {
+  it("uses selection conversion for inline equations when text-range selection is available", async () => {
     vi.spyOn(powerpointService, "getPowerPointHostCapabilities").mockResolvedValue({
       textRangeSelection: true,
       nativeTable: false,
@@ -152,13 +152,15 @@ describe("native equation helper client", () => {
     });
     const addRichTextBox = vi.spyOn(powerpointService, "addRichTextBox").mockResolvedValue("shape-1");
     const selectShapes = vi.spyOn(powerpointService, "selectShapes").mockResolvedValue();
-    vi.spyOn(powerpointService, "getSelectedShapeIds").mockResolvedValue(["shape-3"]);
     const selectTextRange = vi.spyOn(powerpointService, "selectTextRange").mockResolvedValue();
+    vi.spyOn(powerpointService, "getSelectedShapeIds").mockResolvedValue(["shape-3"]);
 
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ ok: true, helperBuildId: "abc123def456", scriptExecutionMode: "temp-file", equationScriptSyntaxOk: true, powerpointRunning: true, nativeEquationAvailable: true, message: "ok" }))
-      .mockResolvedValueOnce(jsonResponse({ ok: true, mode: "native", nativeCount: 2, strategyUsed: "latex-ribbon", message: "done" }));
+      .mockResolvedValueOnce(jsonResponse({ ok: true, mode: "native", nativeCount: 1, strategyUsed: "equation-insert", message: "done-a" }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, helperBuildId: "abc123def456", scriptExecutionMode: "temp-file", equationScriptSyntaxOk: true, powerpointRunning: true, nativeEquationAvailable: true, message: "ok" }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, mode: "native", nativeCount: 1, strategyUsed: "equation-insert", message: "done-b" }));
     vi.stubGlobal("fetch", fetchMock);
 
     const text = "其中，\\delta 和 \\lambda。";
@@ -172,11 +174,15 @@ describe("native equation helper client", () => {
     });
 
     expect(addRichTextBox).toHaveBeenCalledTimes(1);
-    expect(selectTextRange).not.toHaveBeenCalled();
-    expect(selectShapes).toHaveBeenCalledWith(["shape-1"]);
-    expect(fetchMock.mock.calls[1][0]).toBe("/native-helper/equation/convert-shape-ranges");
+    expect(selectShapes).not.toHaveBeenCalled();
+    expect(selectTextRange).toHaveBeenCalledTimes(2);
+    expect(selectTextRange).toHaveBeenNthCalledWith(1, "shape-1", 12, 7);
+    expect(selectTextRange).toHaveBeenNthCalledWith(2, "shape-3", 3, 6);
+    expect(fetchMock.mock.calls[1][0]).toBe("/native-helper/equation/convert-selection");
+    expect(fetchMock.mock.calls[3][0]).toBe("/native-helper/equation/convert-selection");
     expect(result.id).toBe("shape-3");
     expect(result.nativeCount).toBe(2);
+    expect(result.mode).toBe("native");
   });
 
   it("uses helper GUI conversion for legacy block equations without text-range selection", async () => {
@@ -193,7 +199,7 @@ describe("native equation helper client", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ ok: true, helperBuildId: "abc123def456", scriptExecutionMode: "temp-file", equationScriptSyntaxOk: true, powerpointRunning: true, nativeEquationAvailable: true, message: "ok" }))
-      .mockResolvedValueOnce(jsonResponse({ ok: true, mode: "native", nativeCount: 1, strategyUsed: "latex-ribbon", message: "done" }));
+      .mockResolvedValueOnce(jsonResponse({ ok: true, mode: "native", nativeCount: 1, strategyUsed: "equation-insert", message: "done" }));
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await nativeEquation.insertNativeEquationBlock({
@@ -208,10 +214,10 @@ describe("native equation helper client", () => {
     expect(request.shapeId).toBe("shape-1");
     expect(request.mode).toBe("block");
     expect(request.placeholders).toHaveLength(1);
-    expect(request.strategyOrder).toEqual(["latex-ribbon"]);
+    expect(request.strategyOrder).toEqual(["equation-insert"]);
     expect(result.id).toBe("shape-3");
     expect(result.nativeCount).toBe(1);
-    expect(result.strategyUsed).toBe("latex-ribbon");
+    expect(result.strategyUsed).toBe("equation-insert");
   });
 
   it("falls back to helper GUI conversion when runtime text editing cannot be entered for block equations", async () => {
@@ -234,7 +240,7 @@ describe("native equation helper client", () => {
       .mockResolvedValueOnce(jsonResponse({ ok: true, helperBuildId: "abc123def456", scriptExecutionMode: "temp-file", equationScriptSyntaxOk: true, powerpointRunning: true, nativeEquationAvailable: true, message: "ok" }))
       .mockResolvedValueOnce(jsonResponse({ ok: false, helperBuildId: "abc123def456", mode: "unsupported", message: "已检测到 PowerPoint，但界面自动化不可用：无法进入文本编辑状态。请先选中文本框，再重试。最后焦点：role=AXGroup, subrole=, label=Slide canvas, AXSelectedTextRange=no:缺少文本选择 (0) (-2700)" }, { status: 500 }))
       .mockResolvedValueOnce(jsonResponse({ ok: true, helperBuildId: "abc123def456", scriptExecutionMode: "temp-file", equationScriptSyntaxOk: true, powerpointRunning: true, nativeEquationAvailable: true, message: "ok" }))
-      .mockResolvedValueOnce(jsonResponse({ ok: true, mode: "native", nativeCount: 1, strategyUsed: "latex-ribbon", message: "done" }));
+      .mockResolvedValueOnce(jsonResponse({ ok: true, mode: "native", nativeCount: 1, strategyUsed: "equation-insert", message: "done" }));
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await nativeEquation.insertNativeEquationBlock({
@@ -269,7 +275,7 @@ describe("native equation helper client", () => {
         getSelectedIds: async () => selectedIds.shift() ?? ["shape-2"],
         convertSelection: async (latex) => {
           convertCalls.push(latex);
-          return { ok: true, mode: "native", strategyUsed: "latex-ribbon", message: `done:${latex}` };
+          return { ok: true, mode: "native", strategyUsed: "equation-insert", message: `done:${latex}` };
         },
       },
     );
@@ -281,7 +287,7 @@ describe("native equation helper client", () => {
     expect(convertCalls).toEqual(["\\lambda", "\\delta"]);
     expect(result.shapeId).toBe("shape-2");
     expect(result.strategy).toBe("officejs-selection");
-    expect(result.strategiesUsed).toEqual(["latex-ribbon"]);
+    expect(result.strategiesUsed).toEqual(["equation-insert"]);
     expect(result.nativeCount).toBe(2);
     expect(result.fallbackCount).toBe(0);
   });
@@ -300,19 +306,19 @@ describe("native equation helper client", () => {
           if (latex === "\\delta") {
             throw new Error("helper unavailable");
           }
-          return { ok: true, mode: "native", strategyUsed: "unicode-math", message: "done" };
+          return { ok: true, mode: "native", strategyUsed: "equation-insert", message: "done" };
         },
       },
     );
 
     expect(result.strategy).toBe("officejs-selection");
-    expect(result.strategiesUsed).toEqual(["unicode-math"]);
+    expect(result.strategiesUsed).toEqual(["equation-insert"]);
     expect(result.nativeCount).toBe(1);
     expect(result.fallbackCount).toBe(1);
     expect(result.remainingEquations.map((equation) => equation.latex)).toEqual(["\\delta"]);
   });
 
-  it("treats LaTeX convert button failures as native failures for inline equations", async () => {
+  it("returns an unsupported summary when inline selection conversion fails", async () => {
     vi.spyOn(powerpointService, "getPowerPointHostCapabilities").mockResolvedValue({
       textRangeSelection: true,
       nativeTable: false,
@@ -330,26 +336,30 @@ describe("native equation helper client", () => {
             ok: false,
             helperBuildId: "abc123def456",
             mode: "unsupported",
-            message: "已检测到 PowerPoint，但自动公式转换失败：latex-convert: 未能自动点击“LaTeX 转数学公式”。",
+            message: "已检测到 PowerPoint，但界面自动化不可用：Command failed: osascript /tmp/test.applescript",
           },
           { status: 500 },
         ),
       );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(
-      nativeEquation.insertNativeEquationTextBox({
-        text: "其中，\\delta 和 \\lambda。",
-        equations: [
-          { start: 3, length: 6, latex: "\\delta" },
-          { start: 12, length: 7, latex: "\\lambda" },
-        ],
-        box: { left: 80, top: 80, width: 360, height: 60 },
-      }),
-    ).rejects.toThrow("latex-convert");
+    const result = await nativeEquation.insertNativeEquationTextBox({
+      text: "其中，\\delta 和 \\lambda。",
+      equations: [
+        { start: 3, length: 6, latex: "\\delta" },
+        { start: 12, length: 7, latex: "\\lambda" },
+      ],
+      box: { left: 80, top: 80, width: 360, height: 60 },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.mode).toBe("unsupported");
+    expect(result.nativeCount).toBe(0);
+    expect(result.message).toContain("原生公式成功 0 个");
+    expect(result.message).toContain("公式降级 2 个");
   });
 
-  it("treats helper button failures as native failures for block equations", async () => {
+  it("treats helper conversion failures as native failures for block equations", async () => {
     vi.spyOn(powerpointService, "getPowerPointHostCapabilities").mockResolvedValue({
       textRangeSelection: false,
       nativeTable: false,
@@ -367,7 +377,7 @@ describe("native equation helper client", () => {
             ok: false,
             helperBuildId: "abc123def456",
             mode: "unsupported",
-            message: "已检测到 PowerPoint，但自动公式转换失败：professional-layout: 未能自动切换为 Professional。",
+            message: "已检测到 PowerPoint，但界面自动化不可用：Command failed: osascript /tmp/test.applescript",
           },
           { status: 500 },
         ),
@@ -379,7 +389,7 @@ describe("native equation helper client", () => {
         latex: "\\frac{a}{b}",
         box: { left: 80, top: 80, width: 360, height: 60 },
       }),
-    ).rejects.toThrow("professional-layout");
+    ).rejects.toThrow("界面自动化不可用");
   });
 
   it("keeps the legacy formatter readable for remaining fallback summaries", () => {
@@ -387,19 +397,19 @@ describe("native equation helper client", () => {
       nativeEquation.formatEquationConversionSummary({
         shapeId: "shape-1",
         strategy: "officejs-selection",
-        strategiesUsed: ["latex-ribbon"],
+        strategiesUsed: ["equation-insert"],
         nativeCount: 1,
         fallbackCount: 0,
         messages: [],
         remainingEquations: [],
       }),
-    ).toBe("原生公式成功 1 个（latex-ribbon），公式降级 0 个");
+    ).toBe("原生公式成功 1 个（equation-insert），公式降级 0 个");
 
     expect(
       nativeEquation.formatEquationConversionSummary({
         shapeId: "shape-1",
         strategy: "helper-gui",
-        strategiesUsed: ["latex-ribbon"],
+        strategiesUsed: ["equation-insert"],
         nativeCount: 0,
         fallbackCount: 1,
         messages: ["失败"],

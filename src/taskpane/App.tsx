@@ -14,6 +14,7 @@ import {
   buildShapeRangeEquationRequest,
   convertEquationRuns,
   convertShapeRangesToNativeEquations,
+  insertNativeEquationTextBox,
   type NativeEquationHelperStrategy,
   shouldRetryWithGuiShapeRange,
 } from "../services/nativeEquation";
@@ -82,7 +83,7 @@ function errorMessage(error: unknown): string {
 const legacyTableWarning = "实验性原生表格不可用，已退文本框网格。";
 
 function strategyLabel(strategy?: NativeEquationHelperStrategy): string {
-  return strategy ? `（${strategy}）` : "";
+  return strategy && strategy !== "equation-insert" ? `（${strategy}）` : "";
 }
 
 export function App() {
@@ -281,6 +282,16 @@ export function App() {
     return `当前 PowerPoint 版本缺少自动原生公式能力，GUI 自动化也失败：${detail}`;
   }
 
+  async function restoreVisibleLatexBlock(
+    latexSource: string,
+    box: Box,
+    textBoxStyle: TextStyle,
+  ): Promise<string> {
+    const restoredShapeId = await addTextBox(latexSource, box, textBoxStyle);
+    rememberLatexSource(restoredShapeId, restoredShapeId, latexSource);
+    return restoredShapeId;
+  }
+
   async function insertNativeEquationBlockFromText(
     normalizedLatex: string,
     box: Box,
@@ -310,22 +321,10 @@ export function App() {
         rememberLatexSource(shapeId, currentShapeId, normalizedLatex);
         return `${successMessage}${strategyLabel(response.strategyUsed)}`;
       } catch (error) {
-        const selectedIds = await getSelectedShapeIdsSafe();
-        await deleteEquationWorkShapes([shapeId, ...selectedIds]);
+        await deleteEquationWorkShapes([shapeId]);
         const failureMessage = formatLegacyEquationFailureMessage(errorMessage(error));
-
-        if (!settings.allowBlockEquationImageFallback) {
-          const restoredShapeId = await addTextBox(normalizedLatex, box, textBoxStyle);
-          rememberLatexSource(restoredShapeId, restoredShapeId, normalizedLatex);
-          throw new Error(failureMessage);
-        }
-
-        const warning = await insertLatexImageForSource(
-          normalizedLatex,
-          box,
-          "当前 PowerPoint 版本缺少自动原生公式能力，GUI 自动化失败，已按设置降级为图片",
-        );
-        return `${warning}：${errorMessage(error)}`;
+        await restoreVisibleLatexBlock(normalizedLatex, box, textBoxStyle);
+        throw new Error(failureMessage);
       }
     }
 
@@ -356,33 +355,18 @@ export function App() {
         rememberLatexSource(guiShapeId, currentShapeId, normalizedLatex);
         return `${successMessage}${strategyLabel(response.strategyUsed)}`;
       } catch (error) {
-        const selectedIds = await getSelectedShapeIdsSafe();
-        await deleteEquationWorkShapes([guiShapeId, ...selectedIds]);
+        await deleteEquationWorkShapes([guiShapeId]);
         const failureMessage = formatLegacyEquationFailureMessage(errorMessage(error));
-
-        if (!settings.allowBlockEquationImageFallback) {
-          const restoredShapeId = await addTextBox(normalizedLatex, box, textBoxStyle);
-          rememberLatexSource(restoredShapeId, restoredShapeId, normalizedLatex);
-          throw new Error(failureMessage);
-        }
-
-        const warning = await insertLatexImageForSource(
-          normalizedLatex,
-          box,
-          "当前 PowerPoint 版本缺少自动原生公式能力，GUI 自动化失败，已按设置降级为图片",
-        );
-        return `${warning}：${errorMessage(error)}`;
+        await restoreVisibleLatexBlock(normalizedLatex, box, textBoxStyle);
+        throw new Error(failureMessage);
       }
     }
 
     const failureMessage = summary.messages.at(-1) ?? "原生公式转换失败。";
-    if (!settings.allowBlockEquationImageFallback) {
-      throw new Error(failureMessage);
-    }
-
-    await deleteShapes([summary.shapeId || shapeId]);
-    const warning = await insertLatexImageForSource(normalizedLatex, box, "原生公式 helper 不可用，已按设置降级为图片");
-    return `${warning}：${failureMessage}`;
+    const currentShapeId = summary.shapeId || shapeId;
+    await deleteEquationWorkShapes([shapeId, currentShapeId]);
+    await restoreVisibleLatexBlock(normalizedLatex, box, textBoxStyle);
+    throw new Error(failureMessage);
   }
 
   async function loadLatexFromSelection(): Promise<void> {
@@ -451,18 +435,19 @@ export function App() {
         return undefined;
       }
 
-      const guiRequest = buildShapeRangeEquationRequest("", text, equations, "inline");
-      const shapeId = await addRichTextBox(guiRequest.workingText, box, baseStyle, runs);
-
       try {
-        await selectShapes([shapeId]);
-        const response = await convertShapeRangesToNativeEquations({ ...guiRequest, shapeId });
-        const currentShapeId = (await getSelectedShapeIdsSafe())[0] || shapeId;
-        rememberLatexSource(shapeId, currentShapeId, latexSource);
-        return response.message;
+        const inserted = await insertNativeEquationTextBox({
+          text,
+          equations,
+          box,
+          baseStyle,
+          runs,
+        });
+        if (inserted.id) {
+          rememberLatexSource(inserted.id, inserted.id, latexSource);
+        }
+        return inserted.message;
       } catch (error) {
-        const selectedIds = await getSelectedShapeIdsSafe();
-        await deleteEquationWorkShapes([shapeId, ...selectedIds]);
         const restoredShapeId = await addRichTextBox(text, box, baseStyle, runs);
         rememberLatexSource(restoredShapeId, restoredShapeId, latexSource);
         const failureMessage = formatLegacyEquationFailureMessage(errorMessage(error));
@@ -562,7 +547,7 @@ export function App() {
         if (!box) {
           throw new Error("Markdown 布局缺少公式模块位置。");
         }
-        return insertNativeEquationBlockFromText(block.content, box, "块级公式已转换为原生公式", hostCapabilities);
+        return insertNativeEquationBlockFromText(block.content, box, "块级公式已转换为原生公式对象", hostCapabilities);
       },
     });
 

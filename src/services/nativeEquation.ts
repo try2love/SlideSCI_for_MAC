@@ -13,8 +13,8 @@ import {
 const HELPER_BASE_URLS = ["/native-helper", "http://127.0.0.1:17926", "http://localhost:17926"];
 let preferredHelperBaseUrl = HELPER_BASE_URLS[0];
 
-export type NativeEquationHelperStrategy = "latex-ribbon" | "unicode-math";
-export const DEFAULT_EQUATION_STRATEGY_ORDER: NativeEquationHelperStrategy[] = ["latex-ribbon"];
+export type NativeEquationHelperStrategy = "equation-insert";
+export const DEFAULT_EQUATION_STRATEGY_ORDER: NativeEquationHelperStrategy[] = ["equation-insert"];
 
 export interface NativeEquationHelperHealth {
   ok: boolean;
@@ -268,7 +268,7 @@ export function buildShapeRangeEquationRequest(
 }
 
 export async function insertNativeEquationTextBox(request: NativeEquationTextBoxRequest): Promise<NativeEquationConversionResponse> {
-  await getPowerPointHostCapabilities();
+  const capabilities = await getPowerPointHostCapabilities();
   if (request.equations.length === 0) {
     const shapeId = await addRichTextBox(request.text, request.box, request.baseStyle ?? {}, request.runs ?? []);
     return {
@@ -277,6 +277,19 @@ export async function insertNativeEquationTextBox(request: NativeEquationTextBox
       id: shapeId,
       nativeCount: 0,
       message: "文本框已插入。",
+    };
+  }
+
+  if (capabilities.textRangeSelection) {
+    const shapeId = await addRichTextBox(request.text, request.box, request.baseStyle ?? {}, request.runs ?? []);
+    const summary = await convertEquationRuns(shapeId, request.equations);
+    return {
+      ok: summary.fallbackCount === 0,
+      mode: summary.fallbackCount === 0 ? "native" : "unsupported",
+      id: summary.shapeId,
+      nativeCount: summary.nativeCount,
+      strategyUsed: summary.strategiesUsed[0],
+      message: formatEquationConversionSummary(summary) ?? "原生公式转换完成。",
     };
   }
 

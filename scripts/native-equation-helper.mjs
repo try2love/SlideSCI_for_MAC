@@ -14,15 +14,8 @@ const POWERPOINT_PROCESS_NAME = "Microsoft PowerPoint";
 const MENU_LABELS = {
   insertMenu: ["Insert", "插入"],
   equationItem: ["Equation", "Equation...", "公式"],
-  contextualMenus: ["Equation", "公式", "Design", "设计", "Convert", "转换"],
-  professionalItem: ["Professional", "Professional...", "专业", "专业型", "转换为专业格式"],
 };
-const RIBBON_LABELS = {
-  convertControls: ["Convert", "转换", "Equation Options", "公式选项"],
-  latexItems: ["LaTeX", "LaTeX 转数学公式", "LaTeX to Math", "从 LaTeX", "转换为数学公式"],
-  professionalItems: ["Professional", "专业", "专业型", "转换为专业格式"],
-};
-const DEFAULT_STRATEGY_ORDER = ["latex-ribbon"];
+const DEFAULT_STRATEGY_ORDER = ["equation-insert"];
 
 export const HELPER_ENDPOINTS = [
   "GET /",
@@ -68,8 +61,22 @@ function execFileAsync(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     execFile(command, args, options, (error, stdout, stderr) => {
       if (error) {
-        const wrapped = new Error((stderr || error.message).trim());
+        const stdoutText = stdout.trim();
+        const stderrText = stderr.trim();
+        const details = [
+          stderrText,
+          stdoutText,
+          error.message,
+          error.code ? `code=${String(error.code)}` : "",
+          error.signal ? `signal=${String(error.signal)}` : "",
+        ]
+          .map((value) => String(value || "").trim())
+          .filter(Boolean);
+        const message = details.join(" | ");
+        const wrapped = new Error(message);
         wrapped.cause = error;
+        wrapped.stdout = stdoutText;
+        wrapped.stderr = stderrText;
         reject(wrapped);
         return;
       }
@@ -196,11 +203,6 @@ function buildEquationAutomationScript(commands) {
 set processName to ${appleScriptString(POWERPOINT_PROCESS_NAME)}
 set insertMenuCandidates to ${appleScriptList(MENU_LABELS.insertMenu)}
 set equationItemCandidates to ${appleScriptList(MENU_LABELS.equationItem)}
-set contextualMenuCandidates to ${appleScriptList(MENU_LABELS.contextualMenus)}
-set professionalItemCandidates to ${appleScriptList(MENU_LABELS.professionalItem)}
-set convertControlCandidates to ${appleScriptList(RIBBON_LABELS.convertControls)}
-set latexRibbonCandidates to ${appleScriptList(RIBBON_LABELS.latexItems)}
-set professionalRibbonCandidates to ${appleScriptList(RIBBON_LABELS.professionalItems)}
 
 on firstExistingMenuBarItem(processName, candidates)
   tell application "System Events"
@@ -229,96 +231,6 @@ on clickFirstMatchingMenuItem(processName, menuCandidates, itemCandidates)
   end tell
   error "未找到菜单命令。"
 end clickFirstMatchingMenuItem
-
-on elementLabel(uiElement)
-  set labelText to ""
-  tell application "System Events"
-    try
-      set labelText to name of uiElement
-    end try
-    if labelText is missing value or labelText is "" then
-      try
-        set labelText to value of attribute "AXTitle" of uiElement
-      end try
-    end if
-    if labelText is missing value or labelText is "" then
-      try
-        set labelText to value of attribute "AXDescription" of uiElement
-      end try
-    end if
-    if labelText is missing value or labelText is "" then
-      try
-        set labelText to description of uiElement
-      end try
-    end if
-  end tell
-  if labelText is missing value then
-    return ""
-  end if
-  return labelText as text
-end elementLabel
-
-on elementAttributeText(uiElement, attributeName)
-  set attributeText to ""
-  tell application "System Events"
-    try
-      set rawValue to value of attribute attributeName of uiElement
-      if rawValue is missing value then
-        return ""
-      end if
-      set attributeText to rawValue as text
-    end try
-  end tell
-  return attributeText
-end elementAttributeText
-
-on matchesCandidates(labelText, candidates)
-  if labelText is "" then
-    return false
-  end if
-  ignoring case
-    repeat with candidateName in candidates
-      if labelText contains (contents of candidateName) then
-        return true
-      end if
-    end repeat
-  end ignoring
-  return false
-end matchesCandidates
-
-on pressControl(uiElement)
-  tell application "System Events"
-    try
-      perform action "AXPress" of uiElement
-    on error
-      click uiElement
-    end try
-  end tell
-end pressControl
-
-on pressFirstMatchingProcessControl(processName, candidates)
-  tell application "System Events"
-    tell process processName
-      set controlCandidates to entire contents
-      repeat with uiElement in controlCandidates
-        try
-          set labelText to my elementLabel(uiElement)
-          if my matchesCandidates(labelText, candidates) then
-            my pressControl(uiElement)
-            return labelText
-          end if
-        end try
-      end repeat
-    end tell
-  end tell
-  error "未找到匹配的界面控件。"
-end pressFirstMatchingProcessControl
-
-on openControlAndChoose(processName, controlCandidates, itemCandidates)
-  my pressFirstMatchingProcessControl(processName, controlCandidates)
-  delay 0.18
-  return my pressFirstMatchingProcessControl(processName, itemCandidates)
-end openControlAndChoose
 
 on raiseScriptError(prefixText, errMsg, errNum)
   error (prefixText & errMsg) number errNum
@@ -399,44 +311,8 @@ on tryInsertEquation(processName, menuCandidates, itemCandidates)
   end try
 end tryInsertEquation
 
-on tryLatexRibbonConvert(processName)
-  try
-    return my pressFirstMatchingProcessControl(processName, latexRibbonCandidates)
-  on error
-    try
-      return my openControlAndChoose(processName, convertControlCandidates, latexRibbonCandidates)
-    on error firstErrMsg number firstErrNum
-      try
-        return my clickFirstMatchingMenuItem(processName, contextualMenuCandidates, latexRibbonCandidates)
-      on error secondErrMsg number secondErrNum
-        error "latex-convert: 未能自动点击“LaTeX 转数学公式”。首个错误：" & firstErrMsg & " (" & (firstErrNum as text) & ")；菜单错误：" & secondErrMsg & " (" & (secondErrNum as text) & ")" number secondErrNum
-      end try
-    end try
-  end try
-end tryLatexRibbonConvert
-
-on tryProfessionalLayout(processName)
-  try
-    return my pressFirstMatchingProcessControl(processName, professionalRibbonCandidates)
-  on error
-    try
-      return my openControlAndChoose(processName, convertControlCandidates, professionalRibbonCandidates)
-    on error firstErrMsg number firstErrNum
-      try
-        return my clickFirstMatchingMenuItem(processName, contextualMenuCandidates, professionalItemCandidates)
-      on error secondErrMsg number secondErrNum
-        error "professional-layout: 未能自动切换为 Professional。首个错误：" & firstErrMsg & " (" & (firstErrNum as text) & ")；菜单错误：" & secondErrMsg & " (" & (secondErrNum as text) & ")" number secondErrNum
-      end try
-    end try
-  end try
-end tryProfessionalLayout
-
 on triggerEquationForRange(processName)
-  my tryInsertEquation(processName, insertMenuCandidates, equationItemCandidates)
-  delay 0.24
-  my tryLatexRibbonConvert(processName)
-  delay 0.18
-  my tryProfessionalLayout(processName)
+  return my tryInsertEquation(processName, insertMenuCandidates, equationItemCandidates)
 end triggerEquationForRange
 
 on replaceRangeAndConvert(processName, startIndex, lengthValue, latexText)
@@ -471,11 +347,7 @@ tell application "System Events"
 end tell
 delay 0.10
 my tryInsertEquation(processName, insertMenuCandidates, equationItemCandidates)
-delay 0.24
-my tryLatexRibbonConvert(processName)
-delay 0.18
-my tryProfessionalLayout(processName)
-return "latex-ribbon"
+return "equation-insert"
 `,
   );
 }
@@ -494,7 +366,7 @@ export function buildConvertShapeRangesScript(payload = {}) {
   return buildEquationAutomationScript(
     `
 ${commands}
-return "latex-ribbon"
+return "equation-insert"
 `,
   );
 }
@@ -503,9 +375,6 @@ function guiAutomationMessage(error) {
   const message = error instanceof Error ? error.message : String(error);
   if (/not authorized|not permitted|-1743|辅助功能|accessibility/i.test(message)) {
     return "已检测到 PowerPoint，但 helper 缺少 macOS 辅助功能权限。请在“系统设置 > 隐私与安全性 > 辅助功能”中允许终端或 Node 控制电脑。";
-  }
-  if (/latex-convert:|professional-layout:/i.test(message)) {
-    return `已检测到 PowerPoint，但自动公式转换失败：${message}。请确认 PowerPoint 窗口处于前台，且当前版本包含对应的 LaTeX/Professional 控件。`;
   }
   return `已检测到 PowerPoint，但界面自动化不可用：${message}。请确认已允许终端或 Node 控制 Microsoft PowerPoint，并保持 PowerPoint 窗口处于前台。`;
 }
@@ -597,7 +466,7 @@ async function health() {
     guiAutomationAvailable: guiAutomation.available,
     accessibilityGranted: guiAutomation.accessibilityGranted,
     hostSelectionApiRequired: false,
-    latexRibbonAvailable: guiAutomation.available,
+    latexRibbonAvailable: false,
     unicodeMathFallbackAvailable: false,
     equationScriptSyntaxOk: syntaxCheck.ok,
     equationScriptSyntaxMessage: syntaxCheck.message,
@@ -623,7 +492,7 @@ async function convertSelectionToEquation(payload = {}) {
     mode: "native",
     nativeCount: 1,
     strategyUsed,
-    message: "已自动完成公式块创建、LaTeX 转数学公式和 Professional 布局。",
+    message: "已将当前选区转换为原生公式对象。",
   };
 }
 
@@ -639,7 +508,7 @@ async function convertShapeRangesToEquation(payload = {}) {
     mode: "native",
     nativeCount: placeholders.length,
     strategyUsed,
-    message: `已自动完成 ${placeholders.length} 个公式块的创建、LaTeX 转数学公式和 Professional 布局。`,
+    message: `已将 ${placeholders.length} 个占位符转换为原生公式对象。`,
   };
 }
 
