@@ -15,7 +15,6 @@ import {
   convertEquationRuns,
   convertShapeRangesToNativeEquations,
   type NativeEquationHelperStrategy,
-  formatEquationConversionSummary,
   shouldRetryWithGuiShapeRange,
 } from "../services/nativeEquation";
 import {
@@ -447,93 +446,34 @@ export function App() {
       runs: TextRun[],
       latexSource: string,
     ): Promise<string | void> {
-      if (!hostCapabilities.textRangeSelection && equations.length > 0) {
-        const guiRequest = buildShapeRangeEquationRequest("", text, equations, "inline");
-        const shapeId = await addRichTextBox(guiRequest.workingText, box, baseStyle, runs);
-
-        try {
-          await selectShapes([shapeId]);
-          const response = await convertShapeRangesToNativeEquations({ ...guiRequest, shapeId });
-          const currentShapeId = (await getSelectedShapeIdsSafe())[0] || shapeId;
-          rememberLatexSource(shapeId, currentShapeId, latexSource);
-          return formatEquationConversionSummary({
-            shapeId: currentShapeId,
-            strategy: "helper-gui",
-            strategiesUsed: response.strategyUsed ? [response.strategyUsed] : [],
-            nativeCount: equations.length,
-            fallbackCount: 0,
-            messages: response.message ? [response.message] : [],
-            remainingEquations: [],
-          });
-        } catch (error) {
-          const selectedIds = await getSelectedShapeIdsSafe();
-          await deleteEquationWorkShapes([shapeId, ...selectedIds]);
-          const restoredShapeId = await addRichTextBox(text, box, baseStyle, runs);
-          rememberLatexSource(restoredShapeId, restoredShapeId, latexSource);
-          const failureMessage = formatLegacyEquationFailureMessage(errorMessage(error));
-
-          if (!settings.allowInlineEquationImageFallback) {
-            throw new Error(failureMessage);
-          }
-
-          const count = await insertInlineEquationImages(text, equations, box, baseStyle.fontSize ?? 14);
-          return `当前 PowerPoint 版本缺少自动原生公式能力，已将 ${count} 个公式降级为图片：${errorMessage(error)}`;
-        }
-      }
-
-      const shapeId = await addRichTextBox(text, box, baseStyle, runs);
       if (equations.length === 0) {
+        await addRichTextBox(text, box, baseStyle, runs);
         return undefined;
       }
 
-      const summary = await convertEquationRuns(shapeId, equations);
-      rememberLatexSource(shapeId, summary.shapeId, latexSource);
-      if (summary.fallbackCount === 0) {
-        return formatEquationConversionSummary(summary);
-      }
+      const guiRequest = buildShapeRangeEquationRequest("", text, equations, "inline");
+      const shapeId = await addRichTextBox(guiRequest.workingText, box, baseStyle, runs);
 
-      if (shouldRetryWithGuiShapeRange(summary.messages.at(-1))) {
-        await deleteEquationWorkShapes([shapeId, summary.shapeId || shapeId]);
-        const guiRequest = buildShapeRangeEquationRequest("", text, equations, "inline");
-        const guiShapeId = await addRichTextBox(guiRequest.workingText, box, baseStyle, runs);
+      try {
+        await selectShapes([shapeId]);
+        const response = await convertShapeRangesToNativeEquations({ ...guiRequest, shapeId });
+        const currentShapeId = (await getSelectedShapeIdsSafe())[0] || shapeId;
+        rememberLatexSource(shapeId, currentShapeId, latexSource);
+        return response.message;
+      } catch (error) {
+        const selectedIds = await getSelectedShapeIdsSafe();
+        await deleteEquationWorkShapes([shapeId, ...selectedIds]);
+        const restoredShapeId = await addRichTextBox(text, box, baseStyle, runs);
+        rememberLatexSource(restoredShapeId, restoredShapeId, latexSource);
+        const failureMessage = formatLegacyEquationFailureMessage(errorMessage(error));
 
-        try {
-          await selectShapes([guiShapeId]);
-          const response = await convertShapeRangesToNativeEquations({ ...guiRequest, shapeId: guiShapeId });
-          const currentShapeId = (await getSelectedShapeIdsSafe())[0] || guiShapeId;
-          rememberLatexSource(guiShapeId, currentShapeId, latexSource);
-          return formatEquationConversionSummary({
-            shapeId: currentShapeId,
-            strategy: "helper-gui",
-            strategiesUsed: response.strategyUsed ? [response.strategyUsed] : [],
-            nativeCount: equations.length,
-            fallbackCount: 0,
-            messages: response.message ? [response.message] : [],
-            remainingEquations: [],
-          });
-        } catch (error) {
-          const selectedIds = await getSelectedShapeIdsSafe();
-          await deleteEquationWorkShapes([guiShapeId, ...selectedIds]);
-          const restoredShapeId = await addRichTextBox(text, box, baseStyle, runs);
-          rememberLatexSource(restoredShapeId, restoredShapeId, latexSource);
-          const failureMessage = formatLegacyEquationFailureMessage(errorMessage(error));
-
-          if (!settings.allowInlineEquationImageFallback) {
-            throw new Error(failureMessage);
-          }
-
-          const count = await insertInlineEquationImages(text, equations, box, baseStyle.fontSize ?? 14);
-          return `当前 PowerPoint 版本缺少自动原生公式能力，已将 ${count} 个公式降级为图片：${errorMessage(error)}`;
+        if (!settings.allowInlineEquationImageFallback) {
+          throw new Error(failureMessage);
         }
-      }
 
-      const failureMessage = summary.messages.at(-1) ?? "原生公式转换失败。";
-      if (!settings.allowInlineEquationImageFallback) {
-        throw new Error(failureMessage);
+        const count = await insertInlineEquationImages(text, equations, box, baseStyle.fontSize ?? 14);
+        return `当前 PowerPoint 版本缺少自动原生公式能力，已将 ${count} 个公式降级为图片：${errorMessage(error)}`;
       }
-
-      const count = await insertInlineEquationImages(text, summary.remainingEquations, box, baseStyle.fontSize ?? 14);
-      return `原生公式成功 ${summary.nativeCount} 个，剩余 ${count} 个已按设置降级为图片：${failureMessage}`;
     }
 
     const result = await renderMarkdownBlocks(blocks, {

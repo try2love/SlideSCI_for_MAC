@@ -201,8 +201,6 @@ set professionalItemCandidates to ${appleScriptList(MENU_LABELS.professionalItem
 set convertControlCandidates to ${appleScriptList(RIBBON_LABELS.convertControls)}
 set latexRibbonCandidates to ${appleScriptList(RIBBON_LABELS.latexItems)}
 set professionalRibbonCandidates to ${appleScriptList(RIBBON_LABELS.professionalItems)}
-set latexClickFailed to false
-set professionalClickFailed to false
 
 on firstExistingMenuBarItem(processName, candidates)
   tell application "System Events"
@@ -402,42 +400,36 @@ on tryInsertEquation(processName, menuCandidates, itemCandidates)
 end tryInsertEquation
 
 on tryLatexRibbonConvert(processName)
-  global latexClickFailed
   try
     return my pressFirstMatchingProcessControl(processName, latexRibbonCandidates)
   on error
     try
       return my openControlAndChoose(processName, convertControlCandidates, latexRibbonCandidates)
-    on error
-      set latexClickFailed to true
-      return "failed"
+    on error firstErrMsg number firstErrNum
+      try
+        return my clickFirstMatchingMenuItem(processName, contextualMenuCandidates, latexRibbonCandidates)
+      on error secondErrMsg number secondErrNum
+        error "latex-convert: 未能自动点击“LaTeX 转数学公式”。首个错误：" & firstErrMsg & " (" & (firstErrNum as text) & ")；菜单错误：" & secondErrMsg & " (" & (secondErrNum as text) & ")" number secondErrNum
+      end try
     end try
   end try
 end tryLatexRibbonConvert
 
 on tryProfessionalLayout(processName)
-  global professionalClickFailed
   try
     return my pressFirstMatchingProcessControl(processName, professionalRibbonCandidates)
   on error
     try
       return my openControlAndChoose(processName, convertControlCandidates, professionalRibbonCandidates)
-    on error
+    on error firstErrMsg number firstErrNum
       try
         return my clickFirstMatchingMenuItem(processName, contextualMenuCandidates, professionalItemCandidates)
-      on error
-        set professionalClickFailed to true
-        return "failed"
+      on error secondErrMsg number secondErrNum
+        error "professional-layout: 未能自动切换为 Professional。首个错误：" & firstErrMsg & " (" & (firstErrNum as text) & ")；菜单错误：" & secondErrMsg & " (" & (secondErrNum as text) & ")" number secondErrNum
       end try
     end try
   end try
 end tryProfessionalLayout
-
-on encodeConversionResult()
-  global latexClickFailed
-  global professionalClickFailed
-  return "latexFailed=" & (latexClickFailed as text) & ";professionalFailed=" & (professionalClickFailed as text)
-end encodeConversionResult
 
 on triggerEquationForRange(processName)
   my tryInsertEquation(processName, insertMenuCandidates, equationItemCandidates)
@@ -483,7 +475,7 @@ delay 0.24
 my tryLatexRibbonConvert(processName)
 delay 0.18
 my tryProfessionalLayout(processName)
-return my encodeConversionResult()
+return "latex-ribbon"
 `,
   );
 }
@@ -502,44 +494,18 @@ export function buildConvertShapeRangesScript(payload = {}) {
   return buildEquationAutomationScript(
     `
 ${commands}
-return my encodeConversionResult()
+return "latex-ribbon"
 `,
   );
-}
-
-function parseAutomationResult(output) {
-  const raw = String(output ?? "").trim();
-  const fields = new Map(
-    raw
-      .split(";")
-      .map((part) => part.split("=", 2))
-      .filter((entry) => entry.length === 2)
-      .map(([key, value]) => [key.trim(), value.trim()]),
-  );
-  return {
-    latexFailed: fields.get("latexFailed") === "true",
-    professionalFailed: fields.get("professionalFailed") === "true",
-  };
-}
-
-function buildAutomationOutcomeMessage(nativeCount, automation) {
-  const targetLabel = nativeCount > 1 ? `已创建 ${nativeCount} 个公式块` : "已创建公式块";
-  if (automation.latexFailed && automation.professionalFailed) {
-    return `${targetLabel}，但自动执行 LaTeX 转数学公式和 Professional 失败，请手动点击。`;
-  }
-  if (automation.latexFailed) {
-    return `${targetLabel}，但自动执行 LaTeX 转数学公式失败，请手动点击。`;
-  }
-  if (automation.professionalFailed) {
-    return `${targetLabel}，但自动执行 Professional 失败，请手动点击。`;
-  }
-  return `${targetLabel}，并已自动执行 LaTeX 转数学公式和 Professional。`;
 }
 
 function guiAutomationMessage(error) {
   const message = error instanceof Error ? error.message : String(error);
   if (/not authorized|not permitted|-1743|辅助功能|accessibility/i.test(message)) {
     return "已检测到 PowerPoint，但 helper 缺少 macOS 辅助功能权限。请在“系统设置 > 隐私与安全性 > 辅助功能”中允许终端或 Node 控制电脑。";
+  }
+  if (/latex-convert:|professional-layout:/i.test(message)) {
+    return `已检测到 PowerPoint，但自动公式转换失败：${message}。请确认 PowerPoint 窗口处于前台，且当前版本包含对应的 LaTeX/Professional 控件。`;
   }
   return `已检测到 PowerPoint，但界面自动化不可用：${message}。请确认已允许终端或 Node 控制 Microsoft PowerPoint，并保持 PowerPoint 窗口处于前台。`;
 }
@@ -650,15 +616,14 @@ export async function rootStatus() {
 }
 
 async function convertSelectionToEquation(payload = {}) {
-  const output = await runOsaScript("convert-selection", buildConvertSelectionScript(payload));
-  const automation = parseAutomationResult(output);
+  const strategyUsed = await runOsaScript("convert-selection", buildConvertSelectionScript(payload));
   return {
     ok: true,
     helperBuildId: HELPER_BUILD_ID,
     mode: "native",
     nativeCount: 1,
-    strategyUsed: automation.latexFailed ? undefined : "latex-ribbon",
-    message: buildAutomationOutcomeMessage(1, automation),
+    strategyUsed,
+    message: "已自动完成公式块创建、LaTeX 转数学公式和 Professional 布局。",
   };
 }
 
@@ -667,15 +632,14 @@ async function convertShapeRangesToEquation(payload = {}) {
   if (placeholders.length === 0) {
     throw new Error("没有需要转换的公式占位符。");
   }
-  const output = await runOsaScript("convert-shape-ranges", buildConvertShapeRangesScript(payload));
-  const automation = parseAutomationResult(output);
+  const strategyUsed = await runOsaScript("convert-shape-ranges", buildConvertShapeRangesScript(payload));
   return {
     ok: true,
     helperBuildId: HELPER_BUILD_ID,
     mode: "native",
     nativeCount: placeholders.length,
-    strategyUsed: automation.latexFailed ? undefined : "latex-ribbon",
-    message: buildAutomationOutcomeMessage(placeholders.length, automation),
+    strategyUsed,
+    message: `已自动完成 ${placeholders.length} 个公式块的创建、LaTeX 转数学公式和 Professional 布局。`,
   };
 }
 

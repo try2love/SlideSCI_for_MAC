@@ -268,36 +268,19 @@ export function buildShapeRangeEquationRequest(
 }
 
 export async function insertNativeEquationTextBox(request: NativeEquationTextBoxRequest): Promise<NativeEquationConversionResponse> {
-  const capabilities = await getPowerPointHostCapabilities();
-  const guiRequest = buildShapeRangeEquationRequest("", request.text, request.equations, "inline");
-
-  if (capabilities.textRangeSelection) {
+  await getPowerPointHostCapabilities();
+  if (request.equations.length === 0) {
     const shapeId = await addRichTextBox(request.text, request.box, request.baseStyle ?? {}, request.runs ?? []);
-    const summary = await convertEquationRuns(shapeId, request.equations);
-    if (summary.fallbackCount === 0) {
-      return {
-        ok: true,
-        mode: "native",
-        id: summary.shapeId,
-        nativeCount: summary.nativeCount,
-        strategyUsed: summary.strategiesUsed.at(0),
-        message: formatEquationConversionSummary(summary) ?? "原生公式转换完成。",
-      };
-    }
-    const failureMessage = summary.messages.at(-1);
-    if (!shouldRetryWithGuiShapeRange(failureMessage)) {
-      return {
-        ok: false,
-        mode: "unsupported",
-        id: summary.shapeId,
-        nativeCount: summary.nativeCount,
-        strategyUsed: summary.strategiesUsed.at(0),
-        message: formatEquationConversionSummary(summary) ?? "原生公式转换失败。",
-      };
-    }
-    await deleteShapes([...new Set([shapeId, summary.shapeId].filter(Boolean))]);
+    return {
+      ok: true,
+      mode: "native",
+      id: shapeId,
+      nativeCount: 0,
+      message: "文本框已插入。",
+    };
   }
 
+  const guiRequest = buildShapeRangeEquationRequest("", request.text, request.equations, "inline");
   const shapeId = await addRichTextBox(guiRequest.workingText, request.box, request.baseStyle ?? {}, request.runs ?? []);
   await selectShapes([shapeId]);
   const response = await convertShapeRangesToNativeEquations({ ...guiRequest, shapeId });
