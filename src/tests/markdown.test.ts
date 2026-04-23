@@ -8,6 +8,7 @@ import {
   splitMarkdownIntoSegments,
 } from "../services/markdown";
 import { markdownToRenderBlocks, renderMarkdownBlocks } from "../services/markdownRender";
+import { createMarkdownSingleColumnLayout } from "../lib/markdownLayout";
 
 describe("splitMarkdownIntoSegments", () => {
   it("splits text, code, table, math, and quote blocks", () => {
@@ -153,6 +154,22 @@ describe("markdown render queue", () => {
       expect(blocks[0].text).toBe("其中，\\delta 是平滑因子，\\lambda 表示噪声衰减系数。");
       expect(blocks[0].equations.map((equation) => equation.latex)).toEqual(["\\delta", "\\lambda"]);
     }
+  });
+
+  it("lays out test.md modules in source order with the table between text and math/code", () => {
+    const blocks = markdownToRenderBlocks(sampleMarkdown);
+    const layout = createMarkdownSingleColumnLayout(blocks, { width: 960, height: 540 });
+    const kinds = layout.map((item) => item.block.kind);
+    const tableIndex = kinds.indexOf("table");
+    const mathIndex = kinds.indexOf("math");
+    const codeIndex = kinds.indexOf("code");
+
+    expect(tableIndex).toBeGreaterThan(0);
+    expect(mathIndex).toBeGreaterThan(tableIndex);
+    expect(codeIndex).toBeGreaterThan(mathIndex);
+    expect(layout[tableIndex].box.top).toBeGreaterThan(layout[tableIndex - 1].box.top);
+    expect(layout[tableIndex].box.top).toBeLessThan(layout[mathIndex].box.top);
+    expect(layout[mathIndex].box.top).toBeLessThan(layout[codeIndex].box.top);
   });
 
   it("continues rendering later modules after one module fails", async () => {

@@ -1,6 +1,6 @@
 import type { Box, NativeEquationRun, TextRun, TextStyle } from "../lib/types";
 
-const HELPER_BASE_URLS = ["http://127.0.0.1:17926", "http://localhost:17926"];
+const HELPER_BASE_URLS = ["/native-helper", "http://127.0.0.1:17926", "http://localhost:17926"];
 let preferredHelperBaseUrl = HELPER_BASE_URLS[0];
 
 export interface NativeEquationHelperHealth {
@@ -26,7 +26,12 @@ export interface NativeEquationConversionSummary {
 
 async function readJsonResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
-  const data = text ? JSON.parse(text) : {};
+  let data: any = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`helper 返回了非 JSON 响应（HTTP ${response.status}）。请确认 npm run helper 正在运行，且 Vite /native-helper 代理已生效。`);
+  }
   if (!response.ok) {
     throw new Error(data.message || response.statusText);
   }
@@ -34,7 +39,19 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
 }
 
 function messageFromError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  if (/load failed|failed to fetch|networkerror|network request failed/i.test(message)) {
+    return "任务窗格无法访问本地公式 helper。请确认已运行 npm run helper，Vite 开发服务已重启以启用 /native-helper 代理，并允许本机 17926 端口访问。";
+  }
+  return message;
+}
+
+function shouldTryNextHelperUrl(baseUrl: string, response: Response): boolean {
+  if (!baseUrl.startsWith("/")) {
+    return false;
+  }
+  const contentType = response.headers.get("Content-Type") ?? "";
+  return response.status === 404 || !contentType.toLowerCase().includes("application/json");
 }
 
 async function fetchHelper(path: string, init?: RequestInit): Promise<Response> {
@@ -47,6 +64,10 @@ async function fetchHelper(path: string, init?: RequestInit): Promise<Response> 
   for (const baseUrl of urls) {
     try {
       const response = await fetch(`${baseUrl}${path}`, init);
+      if (shouldTryNextHelperUrl(baseUrl, response)) {
+        lastError = new Error(`同源 helper 代理不可用：HTTP ${response.status}`);
+        continue;
+      }
       preferredHelperBaseUrl = baseUrl;
       return response;
     } catch (error) {

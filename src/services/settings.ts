@@ -26,6 +26,7 @@ export interface AppSettings {
   sortMode: SortMode;
   codeDarkBackground: boolean;
   codeLanguage: string;
+  allowEquationImageFallback: boolean;
 }
 
 export const defaultSettings: AppSettings = {
@@ -51,6 +52,7 @@ export const defaultSettings: AppSettings = {
   sortMode: "position",
   codeDarkBackground: true,
   codeLanguage: "matlab",
+  allowEquationImageFallback: false,
 };
 
 export function loadSettings(): AppSettings {

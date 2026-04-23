@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getLatexForShape, loadClipboardState, resolveLatexSource, saveClipboardState, saveLatexForShape } from "../services/settings";
+import { getLatexForShape, loadClipboardState, loadSettings, resolveLatexSource, saveClipboardState, saveLatexForShape } from "../services/settings";
 
 describe("settings persistence helpers", () => {
   beforeEach(() => {
@@ -49,5 +49,12 @@ describe("settings persistence helpers", () => {
     expect(state.centers).toEqual([{ left: 1, top: 2 }]);
     expect(state.width).toBe(10);
     expect(state.height).toBe(20);
+  });
+
+  it("defaults equation image fallback to disabled for old settings", () => {
+    localStorage.setItem("slidesci_for_mac:settings", JSON.stringify({ codeLanguage: "python" }));
+    const settings = loadSettings();
+    expect(settings.codeLanguage).toBe("python");
+    expect(settings.allowEquationImageFallback).toBe(false);
   });
 });

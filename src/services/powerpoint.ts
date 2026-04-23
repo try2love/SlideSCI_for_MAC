@@ -2,6 +2,18 @@ import type { Box, ShapeLayout, SlideShape, TextRun, TextStyle } from "../lib/ty
 
 type OfficeShape = Record<string, any>;
 
+export interface SlidePageSize {
+  width: number;
+  height: number;
+  warning?: string;
+}
+
+const fallbackSlidePageSize: SlidePageSize = {
+  width: 960,
+  height: 540,
+  warning: "当前 PowerPoint API 未返回页面尺寸，已按 16:9 宽屏默认尺寸排版。",
+};
+
 function ensurePowerPoint(): any {
   const powerpoint = (globalThis as any).PowerPoint;
   if (!powerpoint?.run) {
@@ -116,6 +128,29 @@ export async function getSelectedShapes(): Promise<SlideShape[]> {
     shapes.load("items/id,name,type,left,top,width,height");
     await context.sync();
     return (shapes.items ?? []).map(toSlideShape);
+  });
+}
+
+export async function getSlidePageSize(): Promise<SlidePageSize> {
+  const PowerPointApi = ensurePowerPoint();
+  return PowerPointApi.run(async (context: any) => {
+    const pageSetup = context.presentation?.pageSetup;
+    if (!pageSetup?.load) {
+      return fallbackSlidePageSize;
+    }
+
+    try {
+      pageSetup.load("slideWidth,slideHeight");
+      await context.sync();
+      const width = Number(pageSetup.slideWidth);
+      const height = Number(pageSetup.slideHeight);
+      if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+        return { width, height };
+      }
+      return fallbackSlidePageSize;
+    } catch {
+      return fallbackSlidePageSize;
+    }
   });
 }
 
@@ -432,14 +467,14 @@ export async function addNativeTableByCells(rows: string[][], box: Box): Promise
   });
 }
 
-async function addNativeTableWithValues(rows: string[][], box: Box, includeBox: boolean): Promise<TableInsertResult> {
+async function addNativeTableWithValues(rows: string[][], box: Box): Promise<TableInsertResult> {
   return withCurrentSlide(async (context, slide) => {
     if (typeof slide.shapes?.addTable !== "function") {
       throw new Error("addTable 不可用");
     }
     const normalizedRows = normalizeTableRows(rows);
     const columnCount = normalizedRows[0]?.length ?? 0;
-    const options = includeBox ? { ...tableBoxOptions(box), values: normalizedRows } : { values: normalizedRows };
+    const options = { ...tableBoxOptions(box), values: normalizedRows };
     const shape = slide.shapes.addTable(normalizedRows.length, columnCount, options);
     shape.load("id");
     await context.sync();
@@ -497,13 +532,7 @@ export async function addTableWithFallback(rows: string[][], box: Box): Promise<
   }
 
   try {
-    return await addNativeTableWithValues(rows, box, false);
-  } catch (error) {
-    errors.push(`原生表格 values 默认位置失败：${errorMessage(error)}`);
-  }
-
-  try {
-    return await addNativeTableWithValues(rows, box, true);
+    return await addNativeTableWithValues(rows, box);
   } catch (error) {
     errors.push(`原生表格 values 含尺寸失败：${errorMessage(error)}`);
   }

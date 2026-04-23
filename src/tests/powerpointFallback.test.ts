@@ -106,6 +106,41 @@ describe("PowerPoint fallback helpers", () => {
     expect(result.warning).toContain("已降级为文本框网格");
   });
 
+  it("keeps explicit table position when falling back to values insertion", async () => {
+    const valuesTable = shape("values-table");
+    const addTable = vi
+      .fn()
+      .mockReturnValueOnce({
+        ...shape("empty-table"),
+        getTable: vi.fn(() => {
+          throw new Error("cell api failed");
+        }),
+      })
+      .mockReturnValueOnce(valuesTable);
+    installPowerPointMock({ addTable });
+
+    const result = await addTableWithFallback(
+      [
+        ["A", "B"],
+        ["1", "2"],
+      ],
+      { left: 10.2, top: 20.7, width: 200.4, height: 80.4 },
+    );
+
+    expect(result.mode).toBe("nativeTable");
+    expect(addTable).toHaveBeenCalledTimes(2);
+    expect(addTable).toHaveBeenNthCalledWith(2, 2, 2, {
+      left: 10,
+      top: 21,
+      width: 200,
+      height: 80,
+      values: [
+        ["A", "B"],
+        ["1", "2"],
+      ],
+    });
+  });
+
   it("creates native tables by first adding an empty table and then filling cells", async () => {
     const table = tableShape("native-table");
     const addTable = vi.fn(() => table);

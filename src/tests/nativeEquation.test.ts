@@ -36,10 +36,21 @@ describe("native equation helper client", () => {
     });
 
     expect(result.id).toBe("native-text");
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "http://127.0.0.1:17926/health", undefined);
-    expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:17926/equation/insert-textbox");
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/native-helper/health", undefined);
+    expect(fetchMock.mock.calls[1][0]).toBe("/native-helper/equation/insert-textbox");
     const body = JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body));
     expect(body.equations.map((equation: { latex: string }) => equation.latex)).toEqual(["\\delta", "\\lambda"]);
+  });
+
+  it("turns Load failed into a helper-specific diagnostic", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Load failed")));
+
+    await expect(
+      insertNativeEquationBlock({
+        latex: "x^2",
+        box: { left: 80, top: 80, width: 360, height: 60 },
+      }),
+    ).rejects.toThrow("任务窗格无法访问本地公式 helper");
   });
 
   it("fails formula modules clearly when the helper is unavailable", async () => {

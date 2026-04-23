@@ -1,11 +1,27 @@
 import http from "node:http";
 import { execFile } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.SLIDESCI_NATIVE_HELPER_PORT || 17926);
 const TEXT_ORIENTATION_HORIZONTAL = 1;
 const MSO_TRUE = -1;
 const MSO_FALSE = 0;
+
+export const HELPER_ENDPOINTS = [
+  "GET /",
+  "GET /health",
+  "POST /equation/convert-selection",
+  "POST /equation/insert-textbox",
+  "POST /equation/insert-block",
+];
+
+export function unknownHelperApiResponse() {
+  return {
+    ok: false,
+    message: "未知 helper API。请访问 /health 查看 helper 状态，或访问 / 查看可用 API。",
+  };
+}
 
 function json(res, status, data) {
   res.writeHead(status, {
@@ -213,6 +229,15 @@ async function health() {
   };
 }
 
+export async function rootStatus() {
+  const status = await health();
+  return {
+    ...status,
+    helper: "SlideSCI native equation helper",
+    endpoints: HELPER_ENDPOINTS,
+  };
+}
+
 async function convertSelectionToEquation() {
   const script = `
 tell application "Microsoft PowerPoint"
@@ -352,13 +377,19 @@ async function insertEquationBlock(payload) {
   };
 }
 
-const server = http.createServer(async (req, res) => {
+export function createNativeEquationHelperServer() {
+  return http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
     json(res, 204, {});
     return;
   }
 
   try {
+    if (req.method === "GET" && req.url === "/") {
+      json(res, 200, await rootStatus());
+      return;
+    }
+
     if (req.method === "GET" && req.url === "/health") {
       json(res, 200, await health());
       return;
@@ -406,7 +437,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    json(res, 404, { ok: false, message: "未知 helper API。" });
+    json(res, 404, unknownHelperApiResponse());
   } catch (error) {
     json(res, 500, {
       ok: false,
@@ -417,8 +448,17 @@ const server = http.createServer(async (req, res) => {
           : String(error),
     });
   }
-});
+  });
+}
 
-server.listen(PORT, HOST, () => {
-  console.log(`SlideSCI native equation helper listening on http://${HOST}:${PORT}`);
-});
+export function startNativeEquationHelperServer() {
+  const server = createNativeEquationHelperServer();
+  server.listen(PORT, HOST, () => {
+    console.log(`SlideSCI native equation helper listening on http://${HOST}:${PORT}`);
+  });
+  return server;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  startNativeEquationHelperServer();
+}
