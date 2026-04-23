@@ -50,6 +50,50 @@ npm run uninstall:mac
 
 当前安装脚本仍要求本机存在 `node` 以运行 helper；仓库里已经加入了 companion/installer 基础设施，后续可继续把 helper 打包成独立可执行文件，去掉这个依赖。
 
+## GitHub 发布
+
+仓库已经加入两条 GitHub Actions 工作流：
+
+- `pages.yml`：当 `main` 更新时，自动把 `dist/` 发布到 GitHub Pages。
+- `release.yml`：当推送 `v*` tag 时，在 macOS runner 上自动：
+  - 构建前端
+  - 编译 `SlideSCICompanion`
+  - 渲染面向 GitHub Pages 的 `manifest.xml`
+  - 打包 release zip
+  - 创建 GitHub Release 并上传附件
+
+首次使用前，请在 GitHub 仓库设置中确认：
+
+- `Settings -> Pages -> Build and deployment`
+- Source 选择 `GitHub Actions`
+
+本地也可以先手动打包预览：
+
+```bash
+npm run release:package -- v0.1.2 https://try2love.github.io/SlideSCI_for_MAC
+```
+
+生成物会出现在：
+
+```text
+dist/release/
+```
+
+建议的发布流程：
+
+```bash
+git add .
+git commit -m "Prepare release v0.1.2"
+git tag v0.1.2
+git push origin main --tags
+```
+
+随后 GitHub 会自动：
+
+1. 用 Pages 托管前端页面
+2. 生成 `SlideSCI-for-Mac-v0.1.2.zip`
+3. 在 Releases 页面创建对应版本并附上安装包
+
 Mac PowerPoint 本地侧载传统 XML manifest：
 
 ```text

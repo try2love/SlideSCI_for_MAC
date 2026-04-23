@@ -11,6 +11,10 @@ LAUNCH_AGENT_ID="com.slidesci.helper-watcher"
 LAUNCH_AGENT_PATH="$LAUNCH_AGENT_DIR/$LAUNCH_AGENT_ID.plist"
 MANIFEST_BASE_URL="${1:-https://localhost:3000}"
 TMP_MANIFEST="$(mktemp /tmp/slidesci-manifest.XXXXXX.xml)"
+SOURCE_HELPER_SCRIPT="$ROOT_DIR/scripts/native-equation-helper.mjs"
+BUNDLED_HELPER_SCRIPT="$ROOT_DIR/helper/native-equation-helper.mjs"
+SOURCE_COMPANION_BIN="$ROOT_DIR/bin/SlideSCICompanion"
+BUNDLED_MANIFEST="$ROOT_DIR/manifest.xml"
 
 NODE_BIN="$(command -v node || true)"
 if [ -z "$NODE_BIN" ]; then
@@ -21,12 +25,25 @@ fi
 
 mkdir -p "$BIN_DIR" "$HELPER_DIR" "$MANIFEST_DIR" "$LAUNCH_AGENT_DIR"
 
-bash "$ROOT_DIR/scripts/build-companion.sh" "$BIN_DIR"
-cp "$ROOT_DIR/scripts/native-equation-helper.mjs" "$HELPER_DIR/native-equation-helper.mjs"
+if [ -x "$SOURCE_COMPANION_BIN" ]; then
+  cp "$SOURCE_COMPANION_BIN" "$BIN_DIR/SlideSCICompanion"
+else
+  bash "$ROOT_DIR/scripts/build-companion.sh" "$BIN_DIR"
+fi
 
-node "$ROOT_DIR/scripts/render-manifest.mjs" "$MANIFEST_BASE_URL" "$TMP_MANIFEST"
-cp "$TMP_MANIFEST" "$MANIFEST_DIR/manifest.xml"
-rm -f "$TMP_MANIFEST"
+if [ -f "$BUNDLED_HELPER_SCRIPT" ]; then
+  cp "$BUNDLED_HELPER_SCRIPT" "$HELPER_DIR/native-equation-helper.mjs"
+else
+  cp "$SOURCE_HELPER_SCRIPT" "$HELPER_DIR/native-equation-helper.mjs"
+fi
+
+if [ -f "$BUNDLED_MANIFEST" ]; then
+  cp "$BUNDLED_MANIFEST" "$MANIFEST_DIR/manifest.xml"
+else
+  node "$ROOT_DIR/scripts/render-manifest.mjs" "$MANIFEST_BASE_URL" "$TMP_MANIFEST"
+  cp "$TMP_MANIFEST" "$MANIFEST_DIR/manifest.xml"
+  rm -f "$TMP_MANIFEST"
+fi
 
 cat > "$LAUNCH_AGENT_PATH" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
