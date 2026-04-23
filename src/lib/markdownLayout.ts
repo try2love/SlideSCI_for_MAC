@@ -35,9 +35,10 @@ function contentWidth(pageWidth: number, marginX: number): number {
 }
 
 function tableSize(rows: string[][], maxWidth: number): Pick<Box, "width" | "height"> {
-  const longestRow = Math.max(0, ...rows.map((row) => row.join("").length));
+  const columnCount = Math.max(1, ...rows.map((row) => row.length));
+  const widthRatio = columnCount >= 3 ? 1 : 0.82;
   return {
-    width: Math.min(maxWidth, Math.max(240, longestRow * 9)),
+    width: Math.max(240, Math.round(maxWidth * widthRatio)),
     height: Math.max(80, rows.length * 28),
   };
 }

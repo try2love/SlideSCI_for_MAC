@@ -170,6 +170,7 @@ describe("markdown render queue", () => {
     expect(layout[tableIndex].box.top).toBeGreaterThan(layout[tableIndex - 1].box.top);
     expect(layout[tableIndex].box.top).toBeLessThan(layout[mathIndex].box.top);
     expect(layout[mathIndex].box.top).toBeLessThan(layout[codeIndex].box.top);
+    expect(layout[tableIndex].box.width).toBe(840);
   });
 
   it("continues rendering later modules after one module fails", async () => {

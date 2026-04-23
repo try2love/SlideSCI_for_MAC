@@ -239,6 +239,10 @@ on openControlAndChoose(processName, controlCandidates, itemCandidates)
   return my pressFirstMatchingProcessControl(processName, itemCandidates)
 end openControlAndChoose
 
+on raiseScriptError(prefixText, errMsg, errNum)
+  error (prefixText & errMsg) number errNum
+end raiseScriptError
+
 on ensureFocusedEditableElement(processName)
   tell application "${POWERPOINT_PROCESS_NAME}"
     activate
@@ -273,7 +277,7 @@ on currentSelectionRange(processName)
   try
     return value of attribute "AXSelectedTextRange" of focusedElement
   on error errMsg number errNum
-    error "无法读取当前文本选区：" & errMsg number errNum
+    my raiseScriptError("无法读取当前文本选区：", errMsg, errNum)
   end try
 end currentSelectionRange
 
@@ -281,7 +285,7 @@ on selectCharacterRange(focusedElement, startIndex, lengthValue)
   try
     set value of attribute "AXSelectedTextRange" of focusedElement to {startIndex, lengthValue}
   on error errMsg number errNum
-    error "无法通过辅助功能选择文本范围：" & errMsg number errNum
+    my raiseScriptError("无法通过辅助功能选择文本范围：", errMsg, errNum)
   end try
 end selectCharacterRange
 

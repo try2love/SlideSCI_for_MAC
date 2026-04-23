@@ -20,6 +20,10 @@ describe("native equation helper script exports", () => {
     expect(convertScript).toContain("LaTeX 转数学公式");
     expect(convertScript).toContain("Convert");
     expect(convertScript).toContain("Professional");
+    expect(convertScript).toContain('error (prefixText & errMsg) number errNum');
+    expect(convertScript).toContain('my raiseScriptError("无法读取当前文本选区：", errMsg, errNum)');
+    expect(convertScript).toContain('my raiseScriptError("无法通过辅助功能选择文本范围：", errMsg, errNum)');
+    expect(convertScript).not.toMatch(/error\s+"[^"]*"\s*&\s*.*number\s+errNum/);
     expect(shapeRangesScript).toContain("AXSelectedTextRange");
     expect(helper.HELPER_ENDPOINTS).toContain("POST /equation/convert-selection");
     expect(helper.HELPER_ENDPOINTS).toContain("POST /equation/convert-shape-ranges");
