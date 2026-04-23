@@ -1,9 +1,14 @@
 import http from "node:http";
 import { execFile } from "node:child_process";
-import { pathToFileURL } from "node:url";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.SLIDESCI_NATIVE_HELPER_PORT || 17926);
+export const SCRIPT_EXECUTION_MODE = "temp-file";
 
 const POWERPOINT_PROCESS_NAME = "Microsoft PowerPoint";
 const MENU_LABELS = {
@@ -17,7 +22,7 @@ const RIBBON_LABELS = {
   latexItems: ["LaTeX", "LaTeX 转数学公式", "LaTeX to Math", "从 LaTeX", "转换为数学公式"],
   professionalItems: ["Professional", "专业", "专业型", "转换为专业格式"],
 };
-const DEFAULT_STRATEGY_ORDER = ["latex-ribbon", "unicode-math"];
+const DEFAULT_STRATEGY_ORDER = ["latex-ribbon"];
 
 export const HELPER_ENDPOINTS = [
   "GET /",
@@ -27,6 +32,12 @@ export const HELPER_ENDPOINTS = [
   "POST /equation/insert-textbox (deprecated)",
   "POST /equation/insert-block (deprecated)",
 ];
+
+const HELPER_FILE_PATH = fileURLToPath(import.meta.url);
+export const HELPER_BUILD_ID = createHash("sha1")
+  .update(await readFile(HELPER_FILE_PATH))
+  .digest("hex")
+  .slice(0, 12);
 
 export function unknownHelperApiResponse() {
   return {
@@ -53,15 +64,67 @@ function json(res, status, data) {
   res.end(JSON.stringify(data));
 }
 
-function runOsaScript(script) {
+function execFileAsync(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    execFile("osascript", ["-e", script], { timeout: 8000 }, (error, stdout, stderr) => {
+    execFile(command, args, options, (error, stdout, stderr) => {
       if (error) {
-        reject(new Error((stderr || error.message).trim()));
+        const wrapped = new Error((stderr || error.message).trim());
+        wrapped.cause = error;
+        reject(wrapped);
         return;
       }
-      resolve(stdout.trim());
+      resolve({ stdout: stdout.trim(), stderr: stderr.trim() });
     });
+  });
+}
+
+async function withTempAppleScript(kind, script, callback) {
+  const dir = await mkdtemp(join(tmpdir(), `slidesci-${HELPER_BUILD_ID}-${kind}-`));
+  const scriptPath = join(dir, `${kind}.applescript`);
+  try {
+    await writeFile(scriptPath, script, "utf8");
+    return await callback({ dir, scriptPath });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+async function compileAppleScriptIfAvailable(scriptPath) {
+  const compiledPath = join(dirname(scriptPath), "compiled.scpt");
+  try {
+    await execFileAsync("osacompile", ["-o", compiledPath, scriptPath], { timeout: 8000 });
+    return {
+      available: true,
+      ok: true,
+      message: "AppleScript 编译校验通过。",
+    };
+  } catch (error) {
+    const cause = error?.cause;
+    if (cause && typeof cause === "object" && "code" in cause && cause.code === "ENOENT") {
+      return {
+        available: false,
+        ok: undefined,
+        message: "未检测到 osacompile，已跳过编译预检。",
+      };
+    }
+    return {
+      available: true,
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    await rm(compiledPath, { force: true });
+  }
+}
+
+async function runOsaScript(kind, script) {
+  return withTempAppleScript(kind, script, async ({ scriptPath }) => {
+    const syntaxCheck = await compileAppleScriptIfAvailable(scriptPath);
+    if (syntaxCheck.ok === false) {
+      throw new Error(`AppleScript 编译失败：${syntaxCheck.message}`);
+    }
+    const { stdout } = await execFileAsync("osascript", [scriptPath], { timeout: 8000 });
+    return stdout;
   });
 }
 
@@ -96,12 +159,6 @@ function appleScriptList(values) {
   return `{${values.map((value) => appleScriptString(value)).join(", ")}}`;
 }
 
-function strategyOrderForPayload(payload = {}) {
-  const raw = Array.isArray(payload.strategyOrder) ? payload.strategyOrder : [];
-  const filtered = raw.filter((item) => item === "latex-ribbon" || item === "unicode-math");
-  return filtered.length > 0 ? filtered : DEFAULT_STRATEGY_ORDER;
-}
-
 export function buildGuiAutomationProbeScript() {
   return `
 set processName to ${appleScriptString(POWERPOINT_PROCESS_NAME)}
@@ -122,12 +179,19 @@ end tell
 `.trim();
 }
 
+export function buildSyntaxProbeScript() {
+  return buildConvertSelectionScript({
+    latex: "\\delta",
+    strategyOrder: DEFAULT_STRATEGY_ORDER,
+  });
+}
+
 function escapeAppleScriptInteger(value, fallback = 0) {
   const integer = Number.parseInt(String(value ?? fallback), 10);
   return Number.isFinite(integer) ? String(integer) : String(fallback);
 }
 
-function buildEquationAutomationScript(strategyOrder, commands) {
+function buildEquationAutomationScript(commands) {
   return `
 set processName to ${appleScriptString(POWERPOINT_PROCESS_NAME)}
 set insertMenuCandidates to ${appleScriptList(MENU_LABELS.insertMenu)}
@@ -137,7 +201,8 @@ set professionalItemCandidates to ${appleScriptList(MENU_LABELS.professionalItem
 set convertControlCandidates to ${appleScriptList(RIBBON_LABELS.convertControls)}
 set latexRibbonCandidates to ${appleScriptList(RIBBON_LABELS.latexItems)}
 set professionalRibbonCandidates to ${appleScriptList(RIBBON_LABELS.professionalItems)}
-set strategyOrder to ${appleScriptList(strategyOrder)}
+set latexClickFailed to false
+set professionalClickFailed to false
 
 on firstExistingMenuBarItem(processName, candidates)
   tell application "System Events"
@@ -169,29 +234,45 @@ end clickFirstMatchingMenuItem
 
 on elementLabel(uiElement)
   set labelText to ""
-  try
-    set labelText to name of uiElement
-  end try
-  if labelText is missing value or labelText is "" then
+  tell application "System Events"
     try
-      set labelText to value of attribute "AXTitle" of uiElement
+      set labelText to name of uiElement
     end try
-  end if
-  if labelText is missing value or labelText is "" then
-    try
-      set labelText to value of attribute "AXDescription" of uiElement
-    end try
-  end if
-  if labelText is missing value or labelText is "" then
-    try
-      set labelText to description of uiElement
-    end try
-  end if
+    if labelText is missing value or labelText is "" then
+      try
+        set labelText to value of attribute "AXTitle" of uiElement
+      end try
+    end if
+    if labelText is missing value or labelText is "" then
+      try
+        set labelText to value of attribute "AXDescription" of uiElement
+      end try
+    end if
+    if labelText is missing value or labelText is "" then
+      try
+        set labelText to description of uiElement
+      end try
+    end if
+  end tell
   if labelText is missing value then
     return ""
   end if
   return labelText as text
 end elementLabel
+
+on elementAttributeText(uiElement, attributeName)
+  set attributeText to ""
+  tell application "System Events"
+    try
+      set rawValue to value of attribute attributeName of uiElement
+      if rawValue is missing value then
+        return ""
+      end if
+      set attributeText to rawValue as text
+    end try
+  end tell
+  return attributeText
+end elementAttributeText
 
 on matchesCandidates(labelText, candidates)
   if labelText is "" then
@@ -203,16 +284,18 @@ on matchesCandidates(labelText, candidates)
         return true
       end if
     end repeat
-  end ignoring case
+  end ignoring
   return false
 end matchesCandidates
 
 on pressControl(uiElement)
-  try
-    perform action "AXPress" of uiElement
-  on error
-    click uiElement
-  end try
+  tell application "System Events"
+    try
+      perform action "AXPress" of uiElement
+    on error
+      click uiElement
+    end try
+  end tell
 end pressControl
 
 on pressFirstMatchingProcessControl(processName, candidates)
@@ -272,21 +355,14 @@ on ensureFocusedEditableElement(processName)
   end tell
 end ensureFocusedEditableElement
 
-on currentSelectionRange(processName)
-  set focusedElement to my ensureFocusedEditableElement(processName)
-  try
-    return value of attribute "AXSelectedTextRange" of focusedElement
-  on error errMsg number errNum
-    my raiseScriptError("无法读取当前文本选区：", errMsg, errNum)
-  end try
-end currentSelectionRange
-
 on selectCharacterRange(focusedElement, startIndex, lengthValue)
-  try
-    set value of attribute "AXSelectedTextRange" of focusedElement to {startIndex, lengthValue}
-  on error errMsg number errNum
-    my raiseScriptError("无法通过辅助功能选择文本范围：", errMsg, errNum)
-  end try
+  tell application "System Events"
+    try
+      set value of attribute "AXSelectedTextRange" of focusedElement to {startIndex, lengthValue}
+    on error errMsg number errNum
+      my raiseScriptError("无法通过辅助功能选择文本范围：", errMsg, errNum)
+    end try
+  end tell
 end selectCharacterRange
 
 on pasteText(processName, textValue)
@@ -318,7 +394,7 @@ on tryInsertEquation(processName, menuCandidates, itemCandidates)
   on error
     tell application "System Events"
       tell process processName
-        keystroke "=" using {control down}
+        keystroke "=" using {option down}
       end tell
     end tell
     return "shortcut"
@@ -326,14 +402,21 @@ on tryInsertEquation(processName, menuCandidates, itemCandidates)
 end tryInsertEquation
 
 on tryLatexRibbonConvert(processName)
+  global latexClickFailed
   try
     return my pressFirstMatchingProcessControl(processName, latexRibbonCandidates)
   on error
-    return my openControlAndChoose(processName, convertControlCandidates, latexRibbonCandidates)
+    try
+      return my openControlAndChoose(processName, convertControlCandidates, latexRibbonCandidates)
+    on error
+      set latexClickFailed to true
+      return "failed"
+    end try
   end try
 end tryLatexRibbonConvert
 
 on tryProfessionalLayout(processName)
+  global professionalClickFailed
   try
     return my pressFirstMatchingProcessControl(processName, professionalRibbonCandidates)
   on error
@@ -343,94 +426,114 @@ on tryProfessionalLayout(processName)
       try
         return my clickFirstMatchingMenuItem(processName, contextualMenuCandidates, professionalItemCandidates)
       on error
-        tell application "System Events"
-          tell process processName
-            keystroke "=" using {control down}
-          end tell
-        end tell
-        return "shortcut"
+        set professionalClickFailed to true
+        return "failed"
       end try
     end try
   end try
 end tryProfessionalLayout
 
-on compileRangeWithLatexRibbon(processName, startIndex, lengthValue, latexText)
-  my replaceRangeText(processName, startIndex, lengthValue, latexText)
-  my reselectRange(processName, startIndex, (length of latexText))
+on encodeConversionResult()
+  global latexClickFailed
+  global professionalClickFailed
+  return "latexFailed=" & (latexClickFailed as text) & ";professionalFailed=" & (professionalClickFailed as text)
+end encodeConversionResult
+
+on triggerEquationForRange(processName)
   my tryInsertEquation(processName, insertMenuCandidates, equationItemCandidates)
   delay 0.24
   my tryLatexRibbonConvert(processName)
   delay 0.18
   my tryProfessionalLayout(processName)
-  return "latex-ribbon"
-end compileRangeWithLatexRibbon
+end triggerEquationForRange
 
-on compileRangeWithUnicodeMath(processName, startIndex, lengthValue, unicodeMathText)
-  if unicodeMathText is "" then
-    error "未提供 UnicodeMath 兜底表达式。"
-  end if
-  my replaceRangeText(processName, startIndex, lengthValue, unicodeMathText)
-  my reselectRange(processName, startIndex, (length of unicodeMathText))
-  my tryInsertEquation(processName, insertMenuCandidates, equationItemCandidates)
-  delay 0.24
-  my tryProfessionalLayout(processName)
-  return "unicode-math"
-end compileRangeWithUnicodeMath
-
-on convertRangeWithStrategies(processName, startIndex, lengthValue, latexText, unicodeMathText, strategyOrder)
-  repeat with strategyName in strategyOrder
-    set currentStrategy to contents of strategyName
-    if currentStrategy is "latex-ribbon" then
-      try
-        return my compileRangeWithLatexRibbon(processName, startIndex, lengthValue, latexText)
-      end try
-    else if currentStrategy is "unicode-math" then
-      try
-        return my compileRangeWithUnicodeMath(processName, startIndex, lengthValue, unicodeMathText)
-      end try
-    end if
-  end repeat
-  error "未能自动完成 LaTeX/UnicodeMath 转换。"
-end convertRangeWithStrategies
+on replaceRangeAndConvert(processName, startIndex, lengthValue, latexText)
+  my replaceRangeText(processName, startIndex, lengthValue, latexText)
+  my reselectRange(processName, startIndex, (length of latexText))
+  my triggerEquationForRange(processName)
+  delay 0.18
+end replaceRangeAndConvert
 
 ${commands}
 `.trim();
 }
 
 export function buildConvertSelectionScript(payload = {}) {
-  const latex = normalizeLatexInput(payload.latex);
-  const unicodeMath = String(payload.unicodeMath ?? "");
-  const strategyOrder = strategyOrderForPayload(payload);
+  normalizeLatexInput(payload.latex);
   return buildEquationAutomationScript(
-    strategyOrder,
     `
-set selectedRange to my currentSelectionRange(processName)
-set strategyUsed to my convertRangeWithStrategies(processName, item 1 of selectedRange, item 2 of selectedRange, ${appleScriptString(latex)}, ${appleScriptString(unicodeMath)}, strategyOrder)
-return strategyUsed
+tell application "${POWERPOINT_PROCESS_NAME}"
+  activate
+end tell
+delay 0.12
+tell application "System Events"
+  if UI elements enabled is false then
+    error "macOS 未授予辅助功能权限，helper 无法驱动 PowerPoint 界面。"
+  end if
+  if not (exists process processName) then
+    error "未检测到 Microsoft PowerPoint。"
+  end if
+  tell process processName
+    set frontmost to true
+  end tell
+end tell
+delay 0.10
+my tryInsertEquation(processName, insertMenuCandidates, equationItemCandidates)
+delay 0.24
+my tryLatexRibbonConvert(processName)
+delay 0.18
+my tryProfessionalLayout(processName)
+return my encodeConversionResult()
 `,
   );
 }
 
 export function buildConvertShapeRangesScript(payload = {}) {
   const placeholders = Array.isArray(payload.placeholders) ? payload.placeholders : [];
-  const strategyOrder = strategyOrderForPayload(payload);
   const commands = placeholders
     .slice()
     .sort((a, b) => Number(b.start) - Number(a.start))
     .map((placeholder) => {
       const latex = normalizeLatexInput(placeholder.latex);
-      const unicodeMath = String(placeholder.unicodeMath ?? "");
-      return `set strategyUsed to my convertRangeWithStrategies(processName, ${escapeAppleScriptInteger(placeholder.start)}, ${escapeAppleScriptInteger(placeholder.length, latex.length)}, ${appleScriptString(latex)}, ${appleScriptString(unicodeMath)}, strategyOrder)`;
+      return `my replaceRangeAndConvert(processName, ${escapeAppleScriptInteger(placeholder.start)}, ${escapeAppleScriptInteger(placeholder.length, latex.length)}, ${appleScriptString(latex)})`;
     })
     .join("\n");
 
   return buildEquationAutomationScript(
-    strategyOrder,
     `
 ${commands}
-return strategyUsed
+return my encodeConversionResult()
 `,
   );
+}
+
+function parseAutomationResult(output) {
+  const raw = String(output ?? "").trim();
+  const fields = new Map(
+    raw
+      .split(";")
+      .map((part) => part.split("=", 2))
+      .filter((entry) => entry.length === 2)
+      .map(([key, value]) => [key.trim(), value.trim()]),
+  );
+  return {
+    latexFailed: fields.get("latexFailed") === "true",
+    professionalFailed: fields.get("professionalFailed") === "true",
+  };
+}
+
+function buildAutomationOutcomeMessage(nativeCount, automation) {
+  const targetLabel = nativeCount > 1 ? `已创建 ${nativeCount} 个公式块` : "已创建公式块";
+  if (automation.latexFailed && automation.professionalFailed) {
+    return `${targetLabel}，但自动执行 LaTeX 转数学公式和 Professional 失败，请手动点击。`;
+  }
+  if (automation.latexFailed) {
+    return `${targetLabel}，但自动执行 LaTeX 转数学公式失败，请手动点击。`;
+  }
+  if (automation.professionalFailed) {
+    return `${targetLabel}，但自动执行 Professional 失败，请手动点击。`;
+  }
+  return `${targetLabel}，并已自动执行 LaTeX 转数学公式和 Professional。`;
 }
 
 function guiAutomationMessage(error) {
@@ -445,9 +548,9 @@ async function isPowerPointRunning() {
   const script = `
 set processName to ${appleScriptString(POWERPOINT_PROCESS_NAME)}
 tell application "System Events" to return exists process processName
-`.trim();
+  `.trim();
   try {
-    return (await runOsaScript(script)) === "true";
+    return (await runOsaScript("powerpoint-running", script)) === "true";
   } catch {
     return false;
   }
@@ -455,7 +558,7 @@ tell application "System Events" to return exists process processName
 
 async function probeGuiAutomation() {
   try {
-    const result = await runOsaScript(buildGuiAutomationProbeScript());
+    const result = await runOsaScript("probe", buildGuiAutomationProbeScript());
     if (result === "ok") {
       return { available: true, accessibilityGranted: true, message: "本地公式 helper 已运行，PowerPoint 界面自动化可用。" };
     }
@@ -487,19 +590,52 @@ async function probeGuiAutomation() {
   }
 }
 
+async function probeEquationScriptSyntax() {
+  return withTempAppleScript("syntax-check", buildSyntaxProbeScript(), async ({ scriptPath }) => {
+    const syntaxCheck = await compileAppleScriptIfAvailable(scriptPath);
+    if (syntaxCheck.ok === false) {
+      return {
+        ok: false,
+        message: syntaxCheck.message,
+      };
+    }
+    if (syntaxCheck.ok === true) {
+      return {
+        ok: true,
+        message: syntaxCheck.message,
+      };
+    }
+    return {
+      ok: undefined,
+      message: syntaxCheck.message,
+    };
+  });
+}
+
 async function health() {
   const powerpointRunning = await isPowerPointRunning();
   const guiAutomation = await probeGuiAutomation();
+  const syntaxCheck = await probeEquationScriptSyntax();
+  const nativeEquationAvailable = guiAutomation.available && syntaxCheck.ok !== false;
+  const message = !powerpointRunning
+    ? "本地公式 helper 已运行，但未检测到 Microsoft PowerPoint。请先打开 PowerPoint。"
+    : syntaxCheck.ok === false
+      ? `本地公式 helper 的 AppleScript 模板编译失败：${syntaxCheck.message}`
+      : guiAutomation.message;
   return {
     ok: true,
+    helperBuildId: HELPER_BUILD_ID,
+    scriptExecutionMode: SCRIPT_EXECUTION_MODE,
     powerpointRunning,
-    nativeEquationAvailable: guiAutomation.available,
+    nativeEquationAvailable,
     guiAutomationAvailable: guiAutomation.available,
     accessibilityGranted: guiAutomation.accessibilityGranted,
     hostSelectionApiRequired: false,
     latexRibbonAvailable: guiAutomation.available,
-    unicodeMathFallbackAvailable: true,
-    message: powerpointRunning ? guiAutomation.message : "本地公式 helper 已运行，但未检测到 Microsoft PowerPoint。请先打开 PowerPoint。",
+    unicodeMathFallbackAvailable: false,
+    equationScriptSyntaxOk: syntaxCheck.ok,
+    equationScriptSyntaxMessage: syntaxCheck.message,
+    message,
   };
 }
 
@@ -514,14 +650,15 @@ export async function rootStatus() {
 }
 
 async function convertSelectionToEquation(payload = {}) {
-  const latex = normalizeLatexInput(payload.latex);
-  const strategyUsed = await runOsaScript(buildConvertSelectionScript(payload));
+  const output = await runOsaScript("convert-selection", buildConvertSelectionScript(payload));
+  const automation = parseAutomationResult(output);
   return {
     ok: true,
+    helperBuildId: HELPER_BUILD_ID,
     mode: "native",
     nativeCount: 1,
-    strategyUsed,
-    message: latex ? `已将当前选区转换为原生公式（${strategyUsed}）：${latex}` : `已将当前选区转换为原生公式（${strategyUsed}）。`,
+    strategyUsed: automation.latexFailed ? undefined : "latex-ribbon",
+    message: buildAutomationOutcomeMessage(1, automation),
   };
 }
 
@@ -530,13 +667,15 @@ async function convertShapeRangesToEquation(payload = {}) {
   if (placeholders.length === 0) {
     throw new Error("没有需要转换的公式占位符。");
   }
-  const strategyUsed = await runOsaScript(buildConvertShapeRangesScript(payload));
+  const output = await runOsaScript("convert-shape-ranges", buildConvertShapeRangesScript(payload));
+  const automation = parseAutomationResult(output);
   return {
     ok: true,
+    helperBuildId: HELPER_BUILD_ID,
     mode: "native",
     nativeCount: placeholders.length,
-    strategyUsed,
-    message: `已通过 GUI 自动化将 ${placeholders.length} 个公式占位符转换为原生公式（${strategyUsed}）。`,
+    strategyUsed: automation.latexFailed ? undefined : "latex-ribbon",
+    message: buildAutomationOutcomeMessage(placeholders.length, automation),
   };
 }
 
@@ -599,6 +738,7 @@ export function createNativeEquationHelperServer() {
     } catch (error) {
       json(res, 500, {
         ok: false,
+        helperBuildId: HELPER_BUILD_ID,
         mode: "unsupported",
         message: guiAutomationMessage(error),
       });

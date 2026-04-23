@@ -26,8 +26,13 @@ export interface AppSettings {
   sortMode: SortMode;
   codeDarkBackground: boolean;
   codeLanguage: string;
-  allowEquationImageFallback: boolean;
+  allowBlockEquationImageFallback: boolean;
+  allowInlineEquationImageFallback: boolean;
 }
+
+type LegacySettings = Partial<AppSettings> & {
+  allowEquationImageFallback?: boolean;
+};
 
 export const defaultSettings: AppSettings = {
   titleFontName: "微软雅黑",
@@ -52,7 +57,8 @@ export const defaultSettings: AppSettings = {
   sortMode: "position",
   codeDarkBackground: true,
   codeLanguage: "matlab",
-  allowEquationImageFallback: false,
+  allowBlockEquationImageFallback: true,
+  allowInlineEquationImageFallback: false,
 };
 
 export function loadSettings(): AppSettings {
@@ -66,7 +72,14 @@ export function loadSettings(): AppSettings {
   }
 
   try {
-    return { ...defaultSettings, ...JSON.parse(raw) } as AppSettings;
+    const parsed = JSON.parse(raw) as LegacySettings;
+    const legacyFallback = typeof parsed.allowEquationImageFallback === "boolean" ? parsed.allowEquationImageFallback : undefined;
+    return {
+      ...defaultSettings,
+      ...parsed,
+      allowBlockEquationImageFallback: legacyFallback ?? parsed.allowBlockEquationImageFallback ?? defaultSettings.allowBlockEquationImageFallback,
+      allowInlineEquationImageFallback: legacyFallback ?? parsed.allowInlineEquationImageFallback ?? defaultSettings.allowInlineEquationImageFallback,
+    };
   } catch {
     return defaultSettings;
   }

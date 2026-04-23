@@ -3,6 +3,7 @@ import { convertLatexToUnicodeMath } from "./unicodeMath";
 import {
   addRichTextBox,
   addTextBox,
+  deleteShapes,
   getPowerPointHostCapabilities,
   getSelectedShapeIds,
   selectShapes,
@@ -13,10 +14,12 @@ const HELPER_BASE_URLS = ["/native-helper", "http://127.0.0.1:17926", "http://lo
 let preferredHelperBaseUrl = HELPER_BASE_URLS[0];
 
 export type NativeEquationHelperStrategy = "latex-ribbon" | "unicode-math";
-export const DEFAULT_EQUATION_STRATEGY_ORDER: NativeEquationHelperStrategy[] = ["latex-ribbon", "unicode-math"];
+export const DEFAULT_EQUATION_STRATEGY_ORDER: NativeEquationHelperStrategy[] = ["latex-ribbon"];
 
 export interface NativeEquationHelperHealth {
   ok: boolean;
+  helperBuildId?: string;
+  scriptExecutionMode?: "temp-file";
   powerpointRunning?: boolean;
   nativeEquationAvailable?: boolean;
   guiAutomationAvailable?: boolean;
@@ -24,11 +27,14 @@ export interface NativeEquationHelperHealth {
   hostSelectionApiRequired?: boolean;
   latexRibbonAvailable?: boolean;
   unicodeMathFallbackAvailable?: boolean;
+  equationScriptSyntaxOk?: boolean;
+  equationScriptSyntaxMessage?: string;
   message: string;
 }
 
 export interface NativeEquationConversionResponse {
   ok: boolean;
+  helperBuildId?: string;
   mode: "native" | "unsupported";
   id?: string;
   nativeCount?: number;
@@ -76,7 +82,8 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
     throw new Error(`helper 返回了非 JSON 响应（HTTP ${response.status}）。请确认 npm run helper 正在运行，且 Vite /native-helper 代理已生效。`);
   }
   if (!response.ok) {
-    throw new Error(data.message || response.statusText);
+    const buildSuffix = data.helperBuildId ? ` [helper build ${data.helperBuildId}]` : "";
+    throw new Error((data.message || response.statusText) + buildSuffix);
   }
   return data as T;
 }
@@ -197,7 +204,8 @@ async function postNativeEquation(path: string, payload: unknown): Promise<Nativ
 
 export function ensureNativeEquationAvailable(health: NativeEquationHelperHealth): void {
   if (!health.ok || !health.nativeEquationAvailable) {
-    throw new Error(health.message || "本地公式 helper 不可用。请先运行 npm run helper 并授权 PowerPoint 自动化。");
+    const buildSuffix = health.helperBuildId ? ` [helper build ${health.helperBuildId}]` : "";
+    throw new Error((health.message || "本地公式 helper 不可用。请先运行 npm run helper 并授权 PowerPoint 自动化。") + buildSuffix);
   }
 }
 
@@ -220,6 +228,11 @@ function placeholderToken(index: number, length: number): string {
     token += seed;
   }
   return token.slice(0, length);
+}
+
+export function shouldRetryWithGuiShapeRange(error: unknown): boolean {
+  const message = messageFromError(error);
+  return /无法进入文本编辑状态|请先选中文本框|AXSelectedTextRange|-2700/i.test(message);
 }
 
 export function buildShapeRangeEquationRequest(
@@ -256,20 +269,35 @@ export function buildShapeRangeEquationRequest(
 
 export async function insertNativeEquationTextBox(request: NativeEquationTextBoxRequest): Promise<NativeEquationConversionResponse> {
   const capabilities = await getPowerPointHostCapabilities();
+  const guiRequest = buildShapeRangeEquationRequest("", request.text, request.equations, "inline");
+
   if (capabilities.textRangeSelection) {
     const shapeId = await addRichTextBox(request.text, request.box, request.baseStyle ?? {}, request.runs ?? []);
     const summary = await convertEquationRuns(shapeId, request.equations);
-    return {
-      ok: summary.fallbackCount === 0,
-      mode: summary.fallbackCount === 0 ? "native" : "unsupported",
-      id: summary.shapeId,
-      nativeCount: summary.nativeCount,
-      strategyUsed: summary.strategiesUsed.at(0),
-      message: formatEquationConversionSummary(summary) ?? "原生公式转换完成。",
-    };
+    if (summary.fallbackCount === 0) {
+      return {
+        ok: true,
+        mode: "native",
+        id: summary.shapeId,
+        nativeCount: summary.nativeCount,
+        strategyUsed: summary.strategiesUsed.at(0),
+        message: formatEquationConversionSummary(summary) ?? "原生公式转换完成。",
+      };
+    }
+    const failureMessage = summary.messages.at(-1);
+    if (!shouldRetryWithGuiShapeRange(failureMessage)) {
+      return {
+        ok: false,
+        mode: "unsupported",
+        id: summary.shapeId,
+        nativeCount: summary.nativeCount,
+        strategyUsed: summary.strategiesUsed.at(0),
+        message: formatEquationConversionSummary(summary) ?? "原生公式转换失败。",
+      };
+    }
+    await deleteShapes([...new Set([shapeId, summary.shapeId].filter(Boolean))]);
   }
 
-  const guiRequest = buildShapeRangeEquationRequest("", request.text, request.equations, "inline");
   const shapeId = await addRichTextBox(guiRequest.workingText, request.box, request.baseStyle ?? {}, request.runs ?? []);
   await selectShapes([shapeId]);
   const response = await convertShapeRangesToNativeEquations({ ...guiRequest, shapeId });
@@ -282,23 +310,30 @@ export async function insertNativeEquationTextBox(request: NativeEquationTextBox
 
 export async function insertNativeEquationBlock(request: NativeEquationBlockRequest): Promise<NativeEquationConversionResponse> {
   const capabilities = await getPowerPointHostCapabilities();
-  if (capabilities.textRangeSelection) {
-    const shapeId = await addTextBox(request.latex, request.box, request.style ?? {});
-    await selectTextRange(shapeId, 0, request.latex.length);
-    const response = await convertSelectedTextToNativeEquation(request.latex, true);
-    const selectedIds = await getSelectedShapeIds();
-    return {
-      ...response,
-      id: selectedIds[0] || shapeId,
-    };
-  }
-
   const guiRequest = buildShapeRangeEquationRequest(
     "",
     request.latex,
     [{ start: 0, length: request.latex.length, latex: request.latex, display: true }],
     "block",
   );
+  if (capabilities.textRangeSelection) {
+    const shapeId = await addTextBox(request.latex, request.box, request.style ?? {});
+    try {
+      await selectTextRange(shapeId, 0, request.latex.length);
+      const response = await convertSelectedTextToNativeEquation(request.latex, true);
+      const selectedIds = await getSelectedShapeIds();
+      return {
+        ...response,
+        id: selectedIds[0] || shapeId,
+      };
+    } catch (error) {
+      if (!shouldRetryWithGuiShapeRange(error)) {
+        throw error;
+      }
+      await deleteShapes([shapeId]);
+    };
+  }
+
   const shapeId = await addTextBox(guiRequest.workingText, request.box, request.style ?? {});
   await selectShapes([shapeId]);
   const response = await convertShapeRangesToNativeEquations({ ...guiRequest, shapeId });
@@ -315,12 +350,6 @@ export interface EquationRunConversionDeps {
   convertSelection: (latex: string, display?: boolean) => Promise<NativeEquationConversionResponse>;
 }
 
-const defaultEquationRunDeps: EquationRunConversionDeps = {
-  selectRange: selectTextRange,
-  getSelectedIds: getSelectedShapeIds,
-  convertSelection: convertSelectedTextToNativeEquation,
-};
-
 function sortEquationsDescending(equations: NativeEquationRun[]): NativeEquationRun[] {
   return [...equations].sort((a, b) => Number(b.start) - Number(a.start));
 }
@@ -328,8 +357,13 @@ function sortEquationsDescending(equations: NativeEquationRun[]): NativeEquation
 export async function convertEquationRuns(
   shapeId: string,
   equations: NativeEquationRun[],
-  deps: EquationRunConversionDeps = defaultEquationRunDeps,
+  deps?: EquationRunConversionDeps,
 ): Promise<NativeEquationConversionSummary> {
+  const resolvedDeps = deps ?? {
+    selectRange: selectTextRange,
+    getSelectedIds: getSelectedShapeIds,
+    convertSelection: convertSelectedTextToNativeEquation,
+  };
   const sortedEquations = sortEquationsDescending(equations);
   let currentShapeId = shapeId;
   const messages: string[] = [];
@@ -338,8 +372,8 @@ export async function convertEquationRuns(
 
   for (const [index, equation] of sortedEquations.entries()) {
     try {
-      await deps.selectRange(currentShapeId, equation.start, equation.length);
-      const response = await deps.convertSelection(equation.latex, equation.display);
+      await resolvedDeps.selectRange(currentShapeId, equation.start, equation.length);
+      const response = await resolvedDeps.convertSelection(equation.latex, equation.display);
       nativeCount += 1;
       if (response.strategyUsed) {
         strategiesUsed.add(response.strategyUsed);
@@ -347,7 +381,7 @@ export async function convertEquationRuns(
       if (response.message) {
         messages.push(response.message);
       }
-      const selectedIds = await deps.getSelectedIds();
+      const selectedIds = await resolvedDeps.getSelectedIds();
       if (selectedIds[0]) {
         currentShapeId = selectedIds[0];
       }

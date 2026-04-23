@@ -16,6 +16,7 @@ import {
   convertShapeRangesToNativeEquations,
   type NativeEquationHelperStrategy,
   formatEquationConversionSummary,
+  shouldRetryWithGuiShapeRange,
 } from "../services/nativeEquation";
 import {
   addLatexImage,
@@ -314,7 +315,7 @@ export function App() {
         await deleteEquationWorkShapes([shapeId, ...selectedIds]);
         const failureMessage = formatLegacyEquationFailureMessage(errorMessage(error));
 
-        if (!settings.allowEquationImageFallback) {
+        if (!settings.allowBlockEquationImageFallback) {
           const restoredShapeId = await addTextBox(normalizedLatex, box, textBoxStyle);
           rememberLatexSource(restoredShapeId, restoredShapeId, normalizedLatex);
           throw new Error(failureMessage);
@@ -340,8 +341,43 @@ export function App() {
       return `${successMessage}${strategyLabel(summary.strategiesUsed[0])}`;
     }
 
+    if (shouldRetryWithGuiShapeRange(summary.messages.at(-1))) {
+      await deleteEquationWorkShapes([shapeId, summary.shapeId || shapeId]);
+      const guiRequest = buildShapeRangeEquationRequest(
+        "",
+        normalizedLatex,
+        [{ start: 0, length: normalizedLatex.length, latex: normalizedLatex, display: true }],
+        "block",
+      );
+      const guiShapeId = await addTextBox(guiRequest.workingText, box, textBoxStyle);
+      try {
+        await selectShapes([guiShapeId]);
+        const response = await convertShapeRangesToNativeEquations({ ...guiRequest, shapeId: guiShapeId });
+        const currentShapeId = (await getSelectedShapeIdsSafe())[0] || guiShapeId;
+        rememberLatexSource(guiShapeId, currentShapeId, normalizedLatex);
+        return `${successMessage}${strategyLabel(response.strategyUsed)}`;
+      } catch (error) {
+        const selectedIds = await getSelectedShapeIdsSafe();
+        await deleteEquationWorkShapes([guiShapeId, ...selectedIds]);
+        const failureMessage = formatLegacyEquationFailureMessage(errorMessage(error));
+
+        if (!settings.allowBlockEquationImageFallback) {
+          const restoredShapeId = await addTextBox(normalizedLatex, box, textBoxStyle);
+          rememberLatexSource(restoredShapeId, restoredShapeId, normalizedLatex);
+          throw new Error(failureMessage);
+        }
+
+        const warning = await insertLatexImageForSource(
+          normalizedLatex,
+          box,
+          "当前 PowerPoint 版本缺少自动原生公式能力，GUI 自动化失败，已按设置降级为图片",
+        );
+        return `${warning}：${errorMessage(error)}`;
+      }
+    }
+
     const failureMessage = summary.messages.at(-1) ?? "原生公式转换失败。";
-    if (!settings.allowEquationImageFallback) {
+    if (!settings.allowBlockEquationImageFallback) {
       throw new Error(failureMessage);
     }
 
@@ -436,7 +472,7 @@ export function App() {
           rememberLatexSource(restoredShapeId, restoredShapeId, latexSource);
           const failureMessage = formatLegacyEquationFailureMessage(errorMessage(error));
 
-          if (!settings.allowEquationImageFallback) {
+          if (!settings.allowInlineEquationImageFallback) {
             throw new Error(failureMessage);
           }
 
@@ -456,8 +492,43 @@ export function App() {
         return formatEquationConversionSummary(summary);
       }
 
+      if (shouldRetryWithGuiShapeRange(summary.messages.at(-1))) {
+        await deleteEquationWorkShapes([shapeId, summary.shapeId || shapeId]);
+        const guiRequest = buildShapeRangeEquationRequest("", text, equations, "inline");
+        const guiShapeId = await addRichTextBox(guiRequest.workingText, box, baseStyle, runs);
+
+        try {
+          await selectShapes([guiShapeId]);
+          const response = await convertShapeRangesToNativeEquations({ ...guiRequest, shapeId: guiShapeId });
+          const currentShapeId = (await getSelectedShapeIdsSafe())[0] || guiShapeId;
+          rememberLatexSource(guiShapeId, currentShapeId, latexSource);
+          return formatEquationConversionSummary({
+            shapeId: currentShapeId,
+            strategy: "helper-gui",
+            strategiesUsed: response.strategyUsed ? [response.strategyUsed] : [],
+            nativeCount: equations.length,
+            fallbackCount: 0,
+            messages: response.message ? [response.message] : [],
+            remainingEquations: [],
+          });
+        } catch (error) {
+          const selectedIds = await getSelectedShapeIdsSafe();
+          await deleteEquationWorkShapes([guiShapeId, ...selectedIds]);
+          const restoredShapeId = await addRichTextBox(text, box, baseStyle, runs);
+          rememberLatexSource(restoredShapeId, restoredShapeId, latexSource);
+          const failureMessage = formatLegacyEquationFailureMessage(errorMessage(error));
+
+          if (!settings.allowInlineEquationImageFallback) {
+            throw new Error(failureMessage);
+          }
+
+          const count = await insertInlineEquationImages(text, equations, box, baseStyle.fontSize ?? 14);
+          return `当前 PowerPoint 版本缺少自动原生公式能力，已将 ${count} 个公式降级为图片：${errorMessage(error)}`;
+        }
+      }
+
       const failureMessage = summary.messages.at(-1) ?? "原生公式转换失败。";
-      if (!settings.allowEquationImageFallback) {
+      if (!settings.allowInlineEquationImageFallback) {
         throw new Error(failureMessage);
       }
 
@@ -771,7 +842,8 @@ export function App() {
             </select>
           </Field>
           <label className="check"><input type="checkbox" checked={settings.codeDarkBackground} onChange={(event) => updateSetting("codeDarkBackground", event.target.checked)} />代码黑色背景</label>
-          <label className="check"><input type="checkbox" checked={settings.allowEquationImageFallback} onChange={(event) => updateSetting("allowEquationImageFallback", event.target.checked)} />允许公式降级为图片</label>
+          <label className="check"><input type="checkbox" checked={settings.allowBlockEquationImageFallback} onChange={(event) => updateSetting("allowBlockEquationImageFallback", event.target.checked)} />允许块级公式降级为图片</label>
+          <label className="check"><input type="checkbox" checked={settings.allowInlineEquationImageFallback} onChange={(event) => updateSetting("allowInlineEquationImageFallback", event.target.checked)} />允许行内公式降级为图片</label>
         </div>
         <textarea value={code} placeholder="粘贴代码" onChange={(event) => setCode(event.target.value)} />
         <button disabled={!canRun} onClick={() => void run("插入代码块", insertCodeBlock)}>插入代码块</button>

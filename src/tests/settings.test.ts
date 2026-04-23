@@ -51,10 +51,25 @@ describe("settings persistence helpers", () => {
     expect(state.height).toBe(20);
   });
 
-  it("defaults equation image fallback to disabled for old settings", () => {
+  it("defaults block and inline equation fallback for old settings", () => {
     localStorage.setItem("slidesci_for_mac:settings", JSON.stringify({ codeLanguage: "python" }));
     const settings = loadSettings();
     expect(settings.codeLanguage).toBe("python");
-    expect(settings.allowEquationImageFallback).toBe(false);
+    expect(settings.allowBlockEquationImageFallback).toBe(true);
+    expect(settings.allowInlineEquationImageFallback).toBe(false);
+  });
+
+  it("migrates legacy enabled equation fallback to both block and inline settings", () => {
+    localStorage.setItem("slidesci_for_mac:settings", JSON.stringify({ allowEquationImageFallback: true }));
+    const settings = loadSettings();
+    expect(settings.allowBlockEquationImageFallback).toBe(true);
+    expect(settings.allowInlineEquationImageFallback).toBe(true);
+  });
+
+  it("migrates legacy disabled equation fallback to both block and inline settings", () => {
+    localStorage.setItem("slidesci_for_mac:settings", JSON.stringify({ allowEquationImageFallback: false }));
+    const settings = loadSettings();
+    expect(settings.allowBlockEquationImageFallback).toBe(false);
+    expect(settings.allowInlineEquationImageFallback).toBe(false);
   });
 });
