@@ -131,6 +131,16 @@ export async function getSelectedShapes(): Promise<SlideShape[]> {
   });
 }
 
+export async function getSelectedShapeIds(): Promise<string[]> {
+  const PowerPointApi = ensurePowerPoint();
+  return PowerPointApi.run(async (context: any) => {
+    const shapes = context.presentation.getSelectedShapes();
+    shapes.load("items/id");
+    await context.sync();
+    return (shapes.items ?? []).map((shape: OfficeShape) => String(shape.id));
+  });
+}
+
 export async function getSlidePageSize(): Promise<SlidePageSize> {
   const PowerPointApi = ensurePowerPoint();
   return PowerPointApi.run(async (context: any) => {
@@ -394,6 +404,7 @@ export interface TableInsertResult {
   ids: string[];
   mode: "nativeTable" | "textGrid";
   warning?: string;
+  warningCode?: "nativeTableUnsupported";
 }
 
 export async function addTable(rows: string[][], box: Box): Promise<string> {
@@ -482,7 +493,13 @@ async function addNativeTableWithValues(rows: string[][], box: Box): Promise<Tab
   });
 }
 
-async function addTableTextGrid(rows: string[][], box: Box, priorErrors: string[]): Promise<TableInsertResult> {
+async function addTableTextGrid(
+  rows: string[][],
+  box: Box,
+  priorErrors: string[],
+  warning?: string,
+  warningCode?: "nativeTableUnsupported",
+): Promise<TableInsertResult> {
   return withCurrentSlide(async (context, slide) => {
     if (typeof slide.shapes?.addTextBox !== "function") {
       throw new Error("addTextBox 不可用");
@@ -518,27 +535,49 @@ async function addTableTextGrid(rows: string[][], box: Box, priorErrors: string[
     return {
       ids: cellShapes.map((shape) => String(shape.id)),
       mode: "textGrid",
-      warning: `${priorErrors.join("；")}，已降级为文本框网格。`,
+      warning: warning ?? (priorErrors.length > 0 ? `${priorErrors.join("；")}，已降级为文本框网格。` : undefined),
+      warningCode,
     };
   });
 }
 
-export async function addTableWithFallback(rows: string[][], box: Box): Promise<TableInsertResult> {
+function isInvalidArgumentError(error: unknown): boolean {
+  return /InvalidArgument/i.test(errorMessage(error));
+}
+
+export async function addTableWithFallback(
+  rows: string[][],
+  box: Box,
+  options: { skipNative?: boolean } = {},
+): Promise<TableInsertResult> {
+  if (options.skipNative) {
+    return addTableTextGrid(rows, box, [], undefined);
+  }
+
   const errors: string[] = [];
+  let nativeUnsupported = false;
   try {
     return await addNativeTableByCells(rows, box);
   } catch (error) {
+    nativeUnsupported = nativeUnsupported || isInvalidArgumentError(error);
     errors.push(`空原生表格逐格填值失败：${errorMessage(error)}`);
   }
 
   try {
     return await addNativeTableWithValues(rows, box);
   } catch (error) {
+    nativeUnsupported = nativeUnsupported || isInvalidArgumentError(error);
     errors.push(`原生表格 values 含尺寸失败：${errorMessage(error)}`);
   }
 
   try {
-    return await addTableTextGrid(rows, box, errors);
+    return await addTableTextGrid(
+      rows,
+      box,
+      errors,
+      nativeUnsupported ? "当前 PowerPoint 版本不支持原生表格，已降级为文本框网格。" : undefined,
+      nativeUnsupported ? "nativeTableUnsupported" : undefined,
+    );
   } catch (error) {
     errors.push(`文本框网格失败：${errorMessage(error)}`);
   }
@@ -571,6 +610,22 @@ export async function updateTextForShapes(
       shape.textFrame.textRange.text = update.text;
       if (update.style) {
         applyShapeStyle(shape, update.style);
+      }
+    }
+    await context.sync();
+  });
+}
+
+export async function deleteShapes(ids: string[]): Promise<void> {
+  if (ids.length === 0) {
+    return;
+  }
+
+  await withCurrentSlide(async (context, slide) => {
+    for (const id of ids) {
+      const shape = slide.shapes.getItem(id);
+      if (typeof shape?.delete === "function") {
+        shape.delete();
       }
     }
     await context.sync();

@@ -106,6 +106,28 @@ describe("PowerPoint fallback helpers", () => {
     expect(result.warning).toContain("已降级为文本框网格");
   });
 
+  it("emits a generic native-table warning after InvalidArgument failures", async () => {
+    const createdCells = [shape("c1"), shape("c2"), shape("c3"), shape("c4")];
+    installPowerPointMock({
+      addTable: vi.fn(() => {
+        throw new Error("InvalidArgument");
+      }),
+      addTextBox: vi.fn(() => createdCells.shift()),
+    });
+
+    const result = await addTableWithFallback(
+      [
+        ["A", "B"],
+        ["1", "2"],
+      ],
+      { left: 10, top: 20, width: 200, height: 80 },
+    );
+
+    expect(result.mode).toBe("textGrid");
+    expect(result.warningCode).toBe("nativeTableUnsupported");
+    expect(result.warning).toBe("当前 PowerPoint 版本不支持原生表格，已降级为文本框网格。");
+  });
+
   it("keeps explicit table position when falling back to values insertion", async () => {
     const valuesTable = shape("values-table");
     const addTable = vi
