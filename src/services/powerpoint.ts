@@ -11,6 +11,7 @@ export interface SlidePageSize {
 export interface PowerPointHostCapabilities {
   textRangeSelection: boolean;
   nativeTable: boolean;
+  experimentalNativeTable: boolean;
 }
 
 const fallbackSlidePageSize: SlidePageSize = {
@@ -209,6 +210,7 @@ export async function getPowerPointHostCapabilities(): Promise<PowerPointHostCap
     return {
       textRangeSelection: Boolean(textRangeSelection),
       nativeTable: Boolean(nativeTable),
+      experimentalNativeTable: typeof slide.shapes?.addTable === "function",
     };
   });
 }
@@ -483,6 +485,14 @@ function tableBoxOptions(box: Box): Record<string, number> {
   };
 }
 
+function applyShapeBox(shape: OfficeShape, box: Box): void {
+  const normalized = tableBoxOptions(box);
+  shape.left = normalized.left;
+  shape.top = normalized.top;
+  shape.width = normalized.width;
+  shape.height = normalized.height;
+}
+
 async function fillNativeTableCells(context: any, shape: OfficeShape, rows: string[][]): Promise<void> {
   if (typeof shape.getTable !== "function") {
     throw new Error("shape.getTable 不可用");
@@ -532,7 +542,23 @@ export async function addNativeTableByCells(rows: string[][], box: Box): Promise
   });
 }
 
-async function addNativeTableWithValues(rows: string[][], box: Box): Promise<TableInsertResult> {
+async function addNativeTableWithValuesOnly(rows: string[][], box: Box): Promise<TableInsertResult> {
+  return withCurrentSlide(async (context, slide) => {
+    if (typeof slide.shapes?.addTable !== "function") {
+      throw new Error("addTable 不可用");
+    }
+    const normalizedRows = normalizeTableRows(rows);
+    const columnCount = normalizedRows[0]?.length ?? 0;
+    const options = { values: normalizedRows };
+    const shape = slide.shapes.addTable(normalizedRows.length, columnCount, options);
+    applyShapeBox(shape, box);
+    shape.load("id");
+    await context.sync();
+    return { ids: [String(shape.id)], mode: "nativeTable" };
+  });
+}
+
+async function addNativeTableWithValuesAndBox(rows: string[][], box: Box): Promise<TableInsertResult> {
   return withCurrentSlide(async (context, slide) => {
     if (typeof slide.shapes?.addTable !== "function") {
       throw new Error("addTable 不可用");
@@ -609,18 +635,21 @@ export async function addTableWithFallback(
   }
 
   const errors: string[] = [];
-  let nativeUnsupported = false;
   try {
     return await addNativeTableByCells(rows, box);
   } catch (error) {
-    nativeUnsupported = nativeUnsupported || isInvalidArgumentError(error);
     errors.push(`空原生表格逐格填值失败：${errorMessage(error)}`);
   }
 
   try {
-    return await addNativeTableWithValues(rows, box);
+    return await addNativeTableWithValuesOnly(rows, box);
   } catch (error) {
-    nativeUnsupported = nativeUnsupported || isInvalidArgumentError(error);
+    errors.push(`原生表格 values 默认位置失败：${errorMessage(error)}`);
+  }
+
+  try {
+    return await addNativeTableWithValuesAndBox(rows, box);
+  } catch (error) {
     errors.push(`原生表格 values 含尺寸失败：${errorMessage(error)}`);
   }
 
@@ -629,8 +658,8 @@ export async function addTableWithFallback(
       rows,
       box,
       errors,
-      nativeUnsupported ? "当前 PowerPoint 版本不支持 PowerPoint 原生表格，已使用文本框网格近似显示。" : undefined,
-      nativeUnsupported ? "nativeTableUnsupported" : undefined,
+      "实验性原生表格不可用，已退文本框网格。",
+      "nativeTableUnsupported",
     );
   } catch (error) {
     errors.push(`文本框网格失败：${errorMessage(error)}`);

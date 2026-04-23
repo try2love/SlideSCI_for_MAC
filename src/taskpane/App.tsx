@@ -14,6 +14,7 @@ import {
   buildShapeRangeEquationRequest,
   convertEquationRuns,
   convertShapeRangesToNativeEquations,
+  type NativeEquationHelperStrategy,
   formatEquationConversionSummary,
 } from "../services/nativeEquation";
 import {
@@ -78,7 +79,11 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-const legacyTableWarning = "当前 PowerPoint 版本不支持 PowerPoint 原生表格，已使用文本框网格近似显示。";
+const legacyTableWarning = "实验性原生表格不可用，已退文本框网格。";
+
+function strategyLabel(strategy?: NativeEquationHelperStrategy): string {
+  return strategy ? `（${strategy}）` : "";
+}
 
 export function App() {
   const [settings, setSettingsState] = useState<AppSettings>(() => loadSettings());
@@ -303,7 +308,7 @@ export function App() {
         const response = await convertShapeRangesToNativeEquations({ ...guiRequest, shapeId });
         const currentShapeId = (await getSelectedShapeIdsSafe())[0] || shapeId;
         rememberLatexSource(shapeId, currentShapeId, normalizedLatex);
-        return response.message ? `${successMessage}：${response.message}` : successMessage;
+        return `${successMessage}${strategyLabel(response.strategyUsed)}`;
       } catch (error) {
         const selectedIds = await getSelectedShapeIdsSafe();
         await deleteEquationWorkShapes([shapeId, ...selectedIds]);
@@ -332,7 +337,7 @@ export function App() {
     ]);
     rememberLatexSource(shapeId, summary.shapeId, normalizedLatex);
     if (summary.fallbackCount === 0) {
-      return successMessage;
+      return `${successMessage}${strategyLabel(summary.strategiesUsed[0])}`;
     }
 
     const failureMessage = summary.messages.at(-1) ?? "原生公式转换失败。";
@@ -363,7 +368,7 @@ export function App() {
     const hostCapabilities = await getPowerPointHostCapabilities();
     const pageSize = await getSlidePageSize();
     const layout = createMarkdownSingleColumnLayout(blocks, pageSize);
-    const nativeTableAvailable = hostCapabilities.nativeTable;
+    let nativeTableAvailable = hostCapabilities.experimentalNativeTable;
     let nativeTableWarningShown = false;
 
     async function insertInlineEquationImages(
@@ -418,6 +423,7 @@ export function App() {
           return formatEquationConversionSummary({
             shapeId: currentShapeId,
             strategy: "helper-gui",
+            strategiesUsed: response.strategyUsed ? [response.strategyUsed] : [],
             nativeCount: equations.length,
             fallbackCount: 0,
             messages: response.message ? [response.message] : [],
@@ -531,6 +537,7 @@ export function App() {
 
         const inserted = await addTableWithFallback(block.rows, box);
         if (inserted.warningCode === "nativeTableUnsupported") {
+          nativeTableAvailable = false;
           if (nativeTableWarningShown) {
             return undefined;
           }
@@ -544,7 +551,7 @@ export function App() {
         if (!box) {
           throw new Error("Markdown 布局缺少公式模块位置。");
         }
-        return insertNativeEquationBlockFromText(block.content, box, "块级公式已插入为原生公式", hostCapabilities);
+        return insertNativeEquationBlockFromText(block.content, box, "块级公式已转换为原生公式", hostCapabilities);
       },
     });
 

@@ -8,12 +8,18 @@ describe("native equation helper script exports", () => {
     const convertScript = helper.buildConvertSelectionScript();
     const probeScript = helper.buildGuiAutomationProbeScript();
     const shapeRangesScript = helper.buildConvertShapeRangesScript({
-      placeholders: [{ start: 3, length: 6, latex: "\\delta" }],
+      placeholders: [{ start: 3, length: 6, latex: "\\delta", unicodeMath: "δ" }],
+      strategyOrder: ["latex-ribbon", "unicode-math"],
     });
     expect(convertScript).not.toContain("do Visual Basic");
     expect(probeScript).not.toContain("do Visual Basic");
     expect(shapeRangesScript).not.toContain("do Visual Basic");
     expect(convertScript).toContain("System Events");
+    expect(convertScript).toContain("latex-ribbon");
+    expect(convertScript).toContain("unicode-math");
+    expect(convertScript).toContain("LaTeX 转数学公式");
+    expect(convertScript).toContain("Convert");
+    expect(convertScript).toContain("Professional");
     expect(shapeRangesScript).toContain("AXSelectedTextRange");
     expect(helper.HELPER_ENDPOINTS).toContain("POST /equation/convert-selection");
     expect(helper.HELPER_ENDPOINTS).toContain("POST /equation/convert-shape-ranges");

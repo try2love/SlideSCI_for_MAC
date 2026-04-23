@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { addLatexImage, addTableWithFallback, getPowerPointHostCapabilities } from "../services/powerpoint";
 
-function shape(id: string) {
+function shape(id: string): any {
   return {
     id,
     fill: { setImage: vi.fn(), setSolidColor: vi.fn() },
@@ -107,7 +107,7 @@ describe("PowerPoint fallback helpers", () => {
     expect(addTextBox).toHaveBeenCalledTimes(4);
     expect(addTextBox).toHaveBeenNthCalledWith(1, "A", { left: 10, top: 20, width: 100, height: 40 });
     expect(addTextBox).toHaveBeenNthCalledWith(4, "2", { left: 110, top: 60, width: 100, height: 40 });
-    expect(result.warning).toContain("已降级为文本框网格");
+    expect(result.warning).toContain("已退文本框网格");
   });
 
   it("emits a generic native-table warning after InvalidArgument failures", async () => {
@@ -129,7 +129,7 @@ describe("PowerPoint fallback helpers", () => {
 
     expect(result.mode).toBe("textGrid");
     expect(result.warningCode).toBe("nativeTableUnsupported");
-    expect(result.warning).toBe("当前 PowerPoint 版本不支持 PowerPoint 原生表格，已使用文本框网格近似显示。");
+    expect(result.warning).toBe("实验性原生表格不可用，已退文本框网格。");
   });
 
   it("keeps explicit table position when falling back to values insertion", async () => {
@@ -156,15 +156,15 @@ describe("PowerPoint fallback helpers", () => {
     expect(result.mode).toBe("nativeTable");
     expect(addTable).toHaveBeenCalledTimes(2);
     expect(addTable).toHaveBeenNthCalledWith(2, 2, 2, {
-      left: 10,
-      top: 21,
-      width: 200,
-      height: 80,
       values: [
         ["A", "B"],
         ["1", "2"],
       ],
     });
+    expect(valuesTable.left).toBe(10);
+    expect(valuesTable.top).toBe(21);
+    expect(valuesTable.width).toBe(200);
+    expect(valuesTable.height).toBe(80);
   });
 
   it("creates native tables by first adding an empty table and then filling cells", async () => {
@@ -216,6 +216,7 @@ describe("PowerPoint fallback helpers", () => {
 
     expect(capabilities.textRangeSelection).toBe(true);
     expect(capabilities.nativeTable).toBe(false);
+    expect(capabilities.experimentalNativeTable).toBe(true);
   });
 
   it("detects text-range selection from the actual host APIs when a shape is selected", async () => {
@@ -249,5 +250,6 @@ describe("PowerPoint fallback helpers", () => {
 
     expect(capabilities.textRangeSelection).toBe(true);
     expect(capabilities.nativeTable).toBe(false);
+    expect(capabilities.experimentalNativeTable).toBe(false);
   });
 });

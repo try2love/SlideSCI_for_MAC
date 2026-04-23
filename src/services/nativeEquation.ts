@@ -1,4 +1,5 @@
 import type { Box, NativeEquationRun, TextRun, TextStyle } from "../lib/types";
+import { convertLatexToUnicodeMath } from "./unicodeMath";
 import {
   addRichTextBox,
   addTextBox,
@@ -11,6 +12,9 @@ import {
 const HELPER_BASE_URLS = ["/native-helper", "http://127.0.0.1:17926", "http://localhost:17926"];
 let preferredHelperBaseUrl = HELPER_BASE_URLS[0];
 
+export type NativeEquationHelperStrategy = "latex-ribbon" | "unicode-math";
+export const DEFAULT_EQUATION_STRATEGY_ORDER: NativeEquationHelperStrategy[] = ["latex-ribbon", "unicode-math"];
+
 export interface NativeEquationHelperHealth {
   ok: boolean;
   powerpointRunning?: boolean;
@@ -18,6 +22,8 @@ export interface NativeEquationHelperHealth {
   guiAutomationAvailable?: boolean;
   accessibilityGranted?: boolean;
   hostSelectionApiRequired?: boolean;
+  latexRibbonAvailable?: boolean;
+  unicodeMathFallbackAvailable?: boolean;
   message: string;
 }
 
@@ -26,12 +32,14 @@ export interface NativeEquationConversionResponse {
   mode: "native" | "unsupported";
   id?: string;
   nativeCount?: number;
+  strategyUsed?: NativeEquationHelperStrategy;
   message: string;
 }
 
 export interface NativeEquationConversionSummary {
   shapeId: string;
   strategy: "officejs-selection" | "helper-gui";
+  strategiesUsed: NativeEquationHelperStrategy[];
   nativeCount: number;
   fallbackCount: number;
   messages: string[];
@@ -40,6 +48,7 @@ export interface NativeEquationConversionSummary {
 
 export interface NativeEquationPlaceholder extends NativeEquationRun {
   token: string;
+  unicodeMath?: string;
 }
 
 export interface NativeEquationShapeRangeRequest {
@@ -48,6 +57,14 @@ export interface NativeEquationShapeRangeRequest {
   workingText: string;
   placeholders: NativeEquationPlaceholder[];
   mode: "inline" | "block";
+  strategyOrder: NativeEquationHelperStrategy[];
+}
+
+export interface NativeEquationSelectionRequest {
+  latex: string;
+  display?: boolean;
+  unicodeMath?: string;
+  strategyOrder: NativeEquationHelperStrategy[];
 }
 
 async function readJsonResponse<T>(response: Response): Promise<T> {
@@ -121,10 +138,16 @@ export async function convertSelectedTextToNativeEquation(latex: string, display
   const health = await checkNativeEquationHelper();
   ensureNativeEquationAvailable(health);
   try {
+    const unicodeMath = tryConvertLatexToUnicodeMath(latex);
     const response = await fetchHelper("/equation/convert-selection", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ latex, display }),
+      body: JSON.stringify({
+        latex,
+        display,
+        unicodeMath,
+        strategyOrder: DEFAULT_EQUATION_STRATEGY_ORDER,
+      } satisfies NativeEquationSelectionRequest),
     });
     return readJsonResponse<NativeEquationConversionResponse>(response);
   } catch (error) {
@@ -178,6 +201,14 @@ export function ensureNativeEquationAvailable(health: NativeEquationHelperHealth
   }
 }
 
+function tryConvertLatexToUnicodeMath(latex: string): string | undefined {
+  try {
+    return convertLatexToUnicodeMath(latex);
+  } catch {
+    return undefined;
+  }
+}
+
 function placeholderToken(index: number, length: number): string {
   const alphabet = "QWERTYUIOPASDFGHJKLZXCVBNM0123456789";
   if (length <= 1) {
@@ -202,6 +233,7 @@ export function buildShapeRangeEquationRequest(
     .map((equation, index) => ({
       ...equation,
       token: placeholderToken(index, Math.max(1, equation.length)),
+      unicodeMath: tryConvertLatexToUnicodeMath(equation.latex),
     }));
 
   let workingText = originalText;
@@ -218,6 +250,7 @@ export function buildShapeRangeEquationRequest(
     workingText,
     placeholders,
     mode,
+    strategyOrder: DEFAULT_EQUATION_STRATEGY_ORDER,
   };
 }
 
@@ -231,6 +264,7 @@ export async function insertNativeEquationTextBox(request: NativeEquationTextBox
       mode: summary.fallbackCount === 0 ? "native" : "unsupported",
       id: summary.shapeId,
       nativeCount: summary.nativeCount,
+      strategyUsed: summary.strategiesUsed.at(0),
       message: formatEquationConversionSummary(summary) ?? "原生公式转换完成。",
     };
   }
@@ -299,6 +333,7 @@ export async function convertEquationRuns(
   const sortedEquations = sortEquationsDescending(equations);
   let currentShapeId = shapeId;
   const messages: string[] = [];
+  const strategiesUsed = new Set<NativeEquationHelperStrategy>();
   let nativeCount = 0;
 
   for (const [index, equation] of sortedEquations.entries()) {
@@ -306,6 +341,9 @@ export async function convertEquationRuns(
       await deps.selectRange(currentShapeId, equation.start, equation.length);
       const response = await deps.convertSelection(equation.latex, equation.display);
       nativeCount += 1;
+      if (response.strategyUsed) {
+        strategiesUsed.add(response.strategyUsed);
+      }
       if (response.message) {
         messages.push(response.message);
       }
@@ -318,6 +356,7 @@ export async function convertEquationRuns(
       return {
         shapeId: currentShapeId,
         strategy: "officejs-selection",
+        strategiesUsed: [...strategiesUsed],
         nativeCount,
         fallbackCount: sortedEquations.length - nativeCount,
         messages,
@@ -329,6 +368,7 @@ export async function convertEquationRuns(
   return {
     shapeId: currentShapeId,
     strategy: "officejs-selection",
+    strategiesUsed: [...strategiesUsed],
     nativeCount,
     fallbackCount: 0,
     messages,
@@ -341,7 +381,8 @@ export function formatEquationConversionSummary(summary: NativeEquationConversio
   if (total === 0) {
     return undefined;
   }
-  const base = `原生公式成功 ${summary.nativeCount} 个，公式降级 ${summary.fallbackCount} 个`;
+  const strategyLabel = summary.strategiesUsed.length === 1 ? `（${summary.strategiesUsed[0]}）` : "";
+  const base = `原生公式成功 ${summary.nativeCount} 个${strategyLabel}，公式降级 ${summary.fallbackCount} 个`;
   if (summary.messages.length === 0) {
     return base;
   }
