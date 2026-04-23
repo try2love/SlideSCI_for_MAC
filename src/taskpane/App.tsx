@@ -10,7 +10,12 @@ import type { Box, LayoutMode, NativeEquationRun, SortMode, TextRun, TextStyle, 
 import { getCodeBlockStyle, getCodeHighlightRuns, CODE_LANGUAGES, CODE_LANGUAGE_LABELS } from "../services/codeBlock";
 import { convertLatexToPngBase64 } from "../services/latexSvg";
 import { formatMarkdownRenderResult, markdownToRenderBlocks, renderMarkdownBlocks } from "../services/markdownRender";
-import { convertEquationRuns, formatEquationConversionSummary } from "../services/nativeEquation";
+import {
+  buildShapeRangeEquationRequest,
+  convertEquationRuns,
+  convertShapeRangesToNativeEquations,
+  formatEquationConversionSummary,
+} from "../services/nativeEquation";
 import {
   addLatexImage,
   addRichTextBox,
@@ -19,6 +24,8 @@ import {
   applyShapeStyleToSelected,
   copySelectedFormat,
   deleteShapes,
+  getPowerPointHostCapabilities,
+  getSelectedShapeIds,
   getSelectedLatexMetadata,
   getSelectedShapes,
   getSlidePageSize,
@@ -70,6 +77,8 @@ function Section({
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+const legacyTableWarning = "当前 PowerPoint 版本不支持 PowerPoint 原生表格，已使用文本框网格近似显示。";
 
 export function App() {
   const [settings, setSettingsState] = useState<AppSettings>(() => loadSettings());
@@ -243,16 +252,80 @@ export function App() {
     }
   }
 
+  async function getSelectedShapeIdsSafe(): Promise<string[]> {
+    try {
+      return await getSelectedShapeIds();
+    } catch {
+      return [];
+    }
+  }
+
+  async function deleteEquationWorkShapes(ids: string[]): Promise<void> {
+    const deduped = [...new Set(ids.filter(Boolean))];
+    if (deduped.length === 0) {
+      return;
+    }
+    try {
+      await deleteShapes(deduped);
+    } catch {
+      // Best effort only. The user-facing flow should continue with the restored shape.
+    }
+  }
+
+  function formatLegacyEquationFailureMessage(detail: string): string {
+    return `当前 PowerPoint 版本缺少自动原生公式能力，GUI 自动化也失败：${detail}`;
+  }
+
   async function insertNativeEquationBlockFromText(
     normalizedLatex: string,
     box: Box,
     successMessage: string,
+    hostCapabilities?: Awaited<ReturnType<typeof getPowerPointHostCapabilities>>,
   ): Promise<string | void> {
-    const shapeId = await addTextBox(normalizedLatex, box, {
+    const capabilities = hostCapabilities ?? await getPowerPointHostCapabilities();
+    const textBoxStyle = {
       fontName: "Cambria Math",
       fontSize: 18,
       color: "#000000",
-      align: "center",
+      align: "center" as const,
+    };
+
+    if (!capabilities.textRangeSelection) {
+      const guiRequest = buildShapeRangeEquationRequest(
+        "",
+        normalizedLatex,
+        [{ start: 0, length: normalizedLatex.length, latex: normalizedLatex, display: true }],
+        "block",
+      );
+      const shapeId = await addTextBox(guiRequest.workingText, box, textBoxStyle);
+      try {
+        await selectShapes([shapeId]);
+        const response = await convertShapeRangesToNativeEquations({ ...guiRequest, shapeId });
+        const currentShapeId = (await getSelectedShapeIdsSafe())[0] || shapeId;
+        rememberLatexSource(shapeId, currentShapeId, normalizedLatex);
+        return response.message ? `${successMessage}：${response.message}` : successMessage;
+      } catch (error) {
+        const selectedIds = await getSelectedShapeIdsSafe();
+        await deleteEquationWorkShapes([shapeId, ...selectedIds]);
+        const failureMessage = formatLegacyEquationFailureMessage(errorMessage(error));
+
+        if (!settings.allowEquationImageFallback) {
+          const restoredShapeId = await addTextBox(normalizedLatex, box, textBoxStyle);
+          rememberLatexSource(restoredShapeId, restoredShapeId, normalizedLatex);
+          throw new Error(failureMessage);
+        }
+
+        const warning = await insertLatexImageForSource(
+          normalizedLatex,
+          box,
+          "当前 PowerPoint 版本缺少自动原生公式能力，GUI 自动化失败，已按设置降级为图片",
+        );
+        return `${warning}：${errorMessage(error)}`;
+      }
+    }
+
+    const shapeId = await addTextBox(normalizedLatex, box, {
+      ...textBoxStyle,
     });
     const summary = await convertEquationRuns(shapeId, [
       { start: 0, length: normalizedLatex.length, latex: normalizedLatex, display: true },
@@ -287,9 +360,10 @@ export function App() {
       throw new Error("请输入 Markdown 内容。");
     }
 
+    const hostCapabilities = await getPowerPointHostCapabilities();
     const pageSize = await getSlidePageSize();
     const layout = createMarkdownSingleColumnLayout(blocks, pageSize);
-    let nativeTableAvailable = true;
+    const nativeTableAvailable = hostCapabilities.nativeTable;
     let nativeTableWarningShown = false;
 
     async function insertInlineEquationImages(
@@ -332,6 +406,39 @@ export function App() {
       runs: TextRun[],
       latexSource: string,
     ): Promise<string | void> {
+      if (!hostCapabilities.textRangeSelection && equations.length > 0) {
+        const guiRequest = buildShapeRangeEquationRequest("", text, equations, "inline");
+        const shapeId = await addRichTextBox(guiRequest.workingText, box, baseStyle, runs);
+
+        try {
+          await selectShapes([shapeId]);
+          const response = await convertShapeRangesToNativeEquations({ ...guiRequest, shapeId });
+          const currentShapeId = (await getSelectedShapeIdsSafe())[0] || shapeId;
+          rememberLatexSource(shapeId, currentShapeId, latexSource);
+          return formatEquationConversionSummary({
+            shapeId: currentShapeId,
+            strategy: "helper-gui",
+            nativeCount: equations.length,
+            fallbackCount: 0,
+            messages: response.message ? [response.message] : [],
+            remainingEquations: [],
+          });
+        } catch (error) {
+          const selectedIds = await getSelectedShapeIdsSafe();
+          await deleteEquationWorkShapes([shapeId, ...selectedIds]);
+          const restoredShapeId = await addRichTextBox(text, box, baseStyle, runs);
+          rememberLatexSource(restoredShapeId, restoredShapeId, latexSource);
+          const failureMessage = formatLegacyEquationFailureMessage(errorMessage(error));
+
+          if (!settings.allowEquationImageFallback) {
+            throw new Error(failureMessage);
+          }
+
+          const count = await insertInlineEquationImages(text, equations, box, baseStyle.fontSize ?? 14);
+          return `当前 PowerPoint 版本缺少自动原生公式能力，已将 ${count} 个公式降级为图片：${errorMessage(error)}`;
+        }
+      }
+
       const shapeId = await addRichTextBox(text, box, baseStyle, runs);
       if (equations.length === 0) {
         return undefined;
@@ -412,13 +519,23 @@ export function App() {
         if (!box) {
           throw new Error("Markdown 布局缺少表格模块位置。");
         }
-        const inserted = await addTableWithFallback(block.rows, box, { skipNative: !nativeTableAvailable });
-        if (inserted.warningCode === "nativeTableUnsupported") {
-          nativeTableAvailable = false;
+
+        if (!nativeTableAvailable) {
+          await addTableWithFallback(block.rows, box, { skipNative: true });
           if (nativeTableWarningShown) {
             return undefined;
           }
           nativeTableWarningShown = true;
+          return legacyTableWarning;
+        }
+
+        const inserted = await addTableWithFallback(block.rows, box);
+        if (inserted.warningCode === "nativeTableUnsupported") {
+          if (nativeTableWarningShown) {
+            return undefined;
+          }
+          nativeTableWarningShown = true;
+          return legacyTableWarning;
         }
         return inserted.warning;
       },
@@ -427,7 +544,7 @@ export function App() {
         if (!box) {
           throw new Error("Markdown 布局缺少公式模块位置。");
         }
-        return insertNativeEquationBlockFromText(block.content, box, "块级公式已插入为原生公式");
+        return insertNativeEquationBlockFromText(block.content, box, "块级公式已插入为原生公式", hostCapabilities);
       },
     });
 

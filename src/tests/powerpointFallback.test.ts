@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { addLatexImage, addTableWithFallback } from "../services/powerpoint";
+import { addLatexImage, addTableWithFallback, getPowerPointHostCapabilities } from "../services/powerpoint";
 
 function shape(id: string) {
   return {
@@ -28,12 +28,16 @@ function tableShape(id: string) {
   };
 }
 
-function installPowerPointMock(shapes: Record<string, unknown>) {
+function installPowerPointMock(shapes: Record<string, unknown>, selectedShapeItems: Array<Record<string, unknown>> = []) {
   const context = {
     sync: vi.fn(async () => undefined),
     presentation: {
       getSelectedSlides: () => ({
         items: [{ shapes }],
+        load: vi.fn(),
+      }),
+      getSelectedShapes: () => ({
+        items: selectedShapeItems,
         load: vi.fn(),
       }),
     },
@@ -125,7 +129,7 @@ describe("PowerPoint fallback helpers", () => {
 
     expect(result.mode).toBe("textGrid");
     expect(result.warningCode).toBe("nativeTableUnsupported");
-    expect(result.warning).toBe("当前 PowerPoint 版本不支持原生表格，已降级为文本框网格。");
+    expect(result.warning).toBe("当前 PowerPoint 版本不支持 PowerPoint 原生表格，已使用文本框网格近似显示。");
   });
 
   it("keeps explicit table position when falling back to values insertion", async () => {
@@ -191,5 +195,59 @@ describe("PowerPoint fallback helpers", () => {
     expect(options).not.toHaveProperty("margins");
     expect(table.cells.get("0:0")?.text).toBe("A");
     expect(table.cells.get("1:1")?.text).toBe("2");
+  });
+
+  it("treats native tables as unsupported when the host requirement set says so", async () => {
+    installPowerPointMock({
+      addTable: vi.fn(),
+    });
+    Object.defineProperty(globalThis, "Office", {
+      configurable: true,
+      value: {
+        context: {
+          requirements: {
+            isSetSupported: vi.fn((setName: string, version: string) => setName === "PowerPointApi" && version === "1.6"),
+          },
+        },
+      },
+    });
+
+    const capabilities = await getPowerPointHostCapabilities();
+
+    expect(capabilities.textRangeSelection).toBe(true);
+    expect(capabilities.nativeTable).toBe(false);
+  });
+
+  it("detects text-range selection from the actual host APIs when a shape is selected", async () => {
+    const setSelected = vi.fn();
+    installPowerPointMock(
+      {
+        getItem: vi.fn(() => ({
+          textFrame: {
+            textRange: {
+              getSubstring: vi.fn(() => ({
+                setSelected,
+              })),
+            },
+          },
+        })),
+      },
+      [{ id: "shape-1" }],
+    );
+    Object.defineProperty(globalThis, "Office", {
+      configurable: true,
+      value: {
+        context: {
+          requirements: {
+            isSetSupported: vi.fn(() => false),
+          },
+        },
+      },
+    });
+
+    const capabilities = await getPowerPointHostCapabilities();
+
+    expect(capabilities.textRangeSelection).toBe(true);
+    expect(capabilities.nativeTable).toBe(false);
   });
 });

@@ -17,6 +17,7 @@ export const HELPER_ENDPOINTS = [
   "GET /",
   "GET /health",
   "POST /equation/convert-selection",
+  "POST /equation/convert-shape-ranges",
   "POST /equation/insert-textbox (deprecated)",
   "POST /equation/insert-block (deprecated)",
 ];
@@ -32,7 +33,7 @@ export function deprecatedInsertEndpointResponse() {
   return {
     ok: false,
     mode: "unsupported",
-    message: "该 helper 接口已弃用。请改为由 Office.js 插入并选中文本后，再调用 /equation/convert-selection。",
+    message: "该 helper 接口已弃用。请改为由 Office.js 插入文本框后，调用 /equation/convert-selection 或 /equation/convert-shape-ranges。",
   };
 }
 
@@ -189,6 +190,148 @@ return "native"
 `.trim();
 }
 
+function escapeAppleScriptInteger(value, fallback = 0) {
+  const integer = Number.parseInt(String(value ?? fallback), 10);
+  return Number.isFinite(integer) ? String(integer) : String(fallback);
+}
+
+export function buildConvertShapeRangesScript(payload = {}) {
+  const placeholders = Array.isArray(payload.placeholders) ? payload.placeholders : [];
+  const commands = placeholders
+    .slice()
+    .sort((a, b) => Number(b.start) - Number(a.start))
+    .map((placeholder) => {
+      const latex = normalizeLatexInput(placeholder.latex);
+      return `my replaceRangeAndConvert(processName, ${escapeAppleScriptInteger(placeholder.start)}, ${escapeAppleScriptInteger(placeholder.length, latex.length)}, ${appleScriptString(latex)})`;
+    })
+    .join("\n");
+
+  return `
+set processName to ${appleScriptString(POWERPOINT_PROCESS_NAME)}
+set insertMenuCandidates to ${appleScriptList(MENU_LABELS.insertMenu)}
+set equationItemCandidates to ${appleScriptList(MENU_LABELS.equationItem)}
+set contextualMenuCandidates to ${appleScriptList(MENU_LABELS.contextualMenus)}
+set professionalItemCandidates to ${appleScriptList(MENU_LABELS.professionalItem)}
+
+on firstExistingMenuBarItem(processName, candidates)
+  tell application "System Events"
+    tell process processName
+      repeat with candidateName in candidates
+        if exists menu bar item (contents of candidateName) of menu bar 1 then
+          return contents of candidateName
+        end if
+      end repeat
+    end tell
+  end tell
+  error "未找到可用菜单栏项目。"
+end firstExistingMenuBarItem
+
+on clickFirstMatchingMenuItem(processName, menuCandidates, itemCandidates)
+  tell application "System Events"
+    tell process processName
+      set menuBarName to my firstExistingMenuBarItem(processName, menuCandidates)
+      repeat with itemName in itemCandidates
+        try
+          click menu item (contents of itemName) of menu 1 of menu bar item menuBarName of menu bar 1
+          return contents of itemName
+        end try
+      end repeat
+    end tell
+  end tell
+  error "未找到菜单命令。"
+end clickFirstMatchingMenuItem
+
+on ensureFocusedEditableElement(processName)
+  tell application "${POWERPOINT_PROCESS_NAME}"
+    activate
+  end tell
+  delay 0.12
+  tell application "System Events"
+    if UI elements enabled is false then
+      error "macOS 未授予辅助功能权限，helper 无法驱动 PowerPoint 界面。"
+    end if
+    tell process processName
+      set frontmost to true
+      try
+        set focusedElement to value of attribute "AXFocusedUIElement"
+        value of attribute "AXSelectedTextRange" of focusedElement
+        return focusedElement
+      end try
+      key code 36
+      delay 0.12
+      set focusedElement to value of attribute "AXFocusedUIElement"
+      try
+        value of attribute "AXSelectedTextRange" of focusedElement
+      on error
+        error "无法进入文本编辑状态。请先选中文本框，再重试。"
+      end try
+      return focusedElement
+    end tell
+  end tell
+end ensureFocusedEditableElement
+
+on selectCharacterRange(focusedElement, startIndex, lengthValue)
+  try
+    set value of attribute "AXSelectedTextRange" of focusedElement to {startIndex, lengthValue}
+  on error errMsg number errNum
+    error "无法通过辅助功能选择文本范围：" & errMsg number errNum
+  end try
+end selectCharacterRange
+
+on pasteText(processName, textValue)
+  set the clipboard to textValue
+  tell application "System Events"
+    tell process processName
+      keystroke "v" using {command down}
+    end tell
+  end tell
+end pasteText
+
+on tryInsertEquation(processName, menuCandidates, itemCandidates)
+  try
+    return my clickFirstMatchingMenuItem(processName, menuCandidates, itemCandidates)
+  on error
+    tell application "System Events"
+      tell process processName
+        keystroke "=" using {control down}
+      end tell
+    end tell
+    return "shortcut"
+  end try
+end tryInsertEquation
+
+on tryProfessionalLayout(processName, menuCandidates, itemCandidates)
+  try
+    return my clickFirstMatchingMenuItem(processName, menuCandidates, itemCandidates)
+  on error
+    return "skipped"
+  end try
+end tryProfessionalLayout
+
+on triggerEquationForRange(processName)
+  my tryInsertEquation(processName, insertMenuCandidates, equationItemCandidates)
+  delay 0.18
+  my tryProfessionalLayout(processName, contextualMenuCandidates, professionalItemCandidates)
+end triggerEquationForRange
+
+on replaceRangeAndConvert(processName, startIndex, lengthValue, latexText)
+  set focusedElement to my ensureFocusedEditableElement(processName)
+  my selectCharacterRange(focusedElement, startIndex, lengthValue)
+  delay 0.05
+  my pasteText(processName, latexText)
+  delay 0.08
+  set focusedElement to my ensureFocusedEditableElement(processName)
+  my selectCharacterRange(focusedElement, startIndex, (length of latexText))
+  delay 0.05
+  my triggerEquationForRange(processName)
+  delay 0.18
+end replaceRangeAndConvert
+
+${commands}
+return "native"
+`.trim();
+}
+
 function guiAutomationMessage(error) {
   const message = error instanceof Error ? error.message : String(error);
   if (/not authorized|not permitted|-1743|辅助功能|accessibility/i.test(message)) {
@@ -252,6 +395,7 @@ async function health() {
     nativeEquationAvailable: guiAutomation.available,
     guiAutomationAvailable: guiAutomation.available,
     accessibilityGranted: guiAutomation.accessibilityGranted,
+    hostSelectionApiRequired: false,
     message: powerpointRunning ? guiAutomation.message : "本地公式 helper 已运行，但未检测到 Microsoft PowerPoint。请先打开 PowerPoint。",
   };
 }
@@ -261,6 +405,7 @@ export async function rootStatus() {
   return {
     ...status,
     helper: "SlideSCI native equation helper",
+    note: "nativeEquationAvailable 仅表示 helper 可驱动 PowerPoint，不代表宿主支持 Office.js 文本范围或 PowerPoint 原生表格 API。",
     endpoints: HELPER_ENDPOINTS,
   };
 }
@@ -273,6 +418,20 @@ async function convertSelectionToEquation(payload = {}) {
     mode: "native",
     nativeCount: 1,
     message: latex ? `已将当前选区转换为原生公式：${latex}` : "已将当前选区转换为原生公式。",
+  };
+}
+
+async function convertShapeRangesToEquation(payload = {}) {
+  const placeholders = Array.isArray(payload.placeholders) ? payload.placeholders : [];
+  if (placeholders.length === 0) {
+    throw new Error("没有需要转换的公式占位符。");
+  }
+  await runOsaScript(buildConvertShapeRangesScript(payload));
+  return {
+    ok: true,
+    mode: "native",
+    nativeCount: placeholders.length,
+    message: `已通过 GUI 自动化将 ${placeholders.length} 个公式占位符转换为原生公式。`,
   };
 }
 
@@ -305,6 +464,20 @@ export function createNativeEquationHelperServer() {
           return;
         }
         json(res, 200, await convertSelectionToEquation(body));
+        return;
+      }
+
+      if (req.method === "POST" && req.url === "/equation/convert-shape-ranges") {
+        const body = await readBody(req);
+        if (!(await isPowerPointRunning())) {
+          json(res, 503, {
+            ok: false,
+            mode: "unsupported",
+            message: "未检测到 Microsoft PowerPoint。请打开 PowerPoint，并保持要转换的文本框处于选中状态。",
+          });
+          return;
+        }
+        json(res, 200, await convertShapeRangesToEquation(body));
         return;
       }
 

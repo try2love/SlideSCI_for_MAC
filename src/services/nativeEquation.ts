@@ -1,5 +1,12 @@
 import type { Box, NativeEquationRun, TextRun, TextStyle } from "../lib/types";
-import { getSelectedShapeIds, selectTextRange } from "./powerpoint";
+import {
+  addRichTextBox,
+  addTextBox,
+  getPowerPointHostCapabilities,
+  getSelectedShapeIds,
+  selectShapes,
+  selectTextRange,
+} from "./powerpoint";
 
 const HELPER_BASE_URLS = ["/native-helper", "http://127.0.0.1:17926", "http://localhost:17926"];
 let preferredHelperBaseUrl = HELPER_BASE_URLS[0];
@@ -10,6 +17,7 @@ export interface NativeEquationHelperHealth {
   nativeEquationAvailable?: boolean;
   guiAutomationAvailable?: boolean;
   accessibilityGranted?: boolean;
+  hostSelectionApiRequired?: boolean;
   message: string;
 }
 
@@ -23,10 +31,23 @@ export interface NativeEquationConversionResponse {
 
 export interface NativeEquationConversionSummary {
   shapeId: string;
+  strategy: "officejs-selection" | "helper-gui";
   nativeCount: number;
   fallbackCount: number;
   messages: string[];
   remainingEquations: NativeEquationRun[];
+}
+
+export interface NativeEquationPlaceholder extends NativeEquationRun {
+  token: string;
+}
+
+export interface NativeEquationShapeRangeRequest {
+  shapeId: string;
+  originalText: string;
+  workingText: string;
+  placeholders: NativeEquationPlaceholder[];
+  mode: "inline" | "block";
 }
 
 async function readJsonResponse<T>(response: Response): Promise<T> {
@@ -111,6 +132,23 @@ export async function convertSelectedTextToNativeEquation(latex: string, display
   }
 }
 
+export async function convertShapeRangesToNativeEquations(
+  request: NativeEquationShapeRangeRequest,
+): Promise<NativeEquationConversionResponse> {
+  const health = await checkNativeEquationHelper();
+  ensureNativeEquationAvailable(health);
+  try {
+    const response = await fetchHelper("/equation/convert-shape-ranges", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    return readJsonResponse<NativeEquationConversionResponse>(response);
+  } catch (error) {
+    throw new Error(messageFromError(error));
+  }
+}
+
 export interface NativeEquationTextBoxRequest {
   text: string;
   equations: NativeEquationRun[];
@@ -140,14 +178,101 @@ export function ensureNativeEquationAvailable(health: NativeEquationHelperHealth
   }
 }
 
+function placeholderToken(index: number, length: number): string {
+  const alphabet = "QWERTYUIOPASDFGHJKLZXCVBNM0123456789";
+  if (length <= 1) {
+    return alphabet[index % alphabet.length];
+  }
+  const seed = `${alphabet[index % alphabet.length]}${index.toString(36).toUpperCase()}`;
+  let token = "";
+  while (token.length < length) {
+    token += seed;
+  }
+  return token.slice(0, length);
+}
+
+export function buildShapeRangeEquationRequest(
+  shapeId: string,
+  originalText: string,
+  equations: NativeEquationRun[],
+  mode: "inline" | "block",
+): NativeEquationShapeRangeRequest {
+  const placeholders = [...equations]
+    .sort((a, b) => Number(b.start) - Number(a.start))
+    .map((equation, index) => ({
+      ...equation,
+      token: placeholderToken(index, Math.max(1, equation.length)),
+    }));
+
+  let workingText = originalText;
+  for (const placeholder of placeholders) {
+    workingText =
+      workingText.slice(0, placeholder.start) +
+      placeholder.token +
+      workingText.slice(placeholder.start + placeholder.length);
+  }
+
+  return {
+    shapeId,
+    originalText,
+    workingText,
+    placeholders,
+    mode,
+  };
+}
+
 export async function insertNativeEquationTextBox(request: NativeEquationTextBoxRequest): Promise<NativeEquationConversionResponse> {
-  void request;
-  throw new Error("insertNativeEquationTextBox 已弃用。请改为先用 Office.js 插入文本框并选中文本，再调用 convertSelectedTextToNativeEquation。");
+  const capabilities = await getPowerPointHostCapabilities();
+  if (capabilities.textRangeSelection) {
+    const shapeId = await addRichTextBox(request.text, request.box, request.baseStyle ?? {}, request.runs ?? []);
+    const summary = await convertEquationRuns(shapeId, request.equations);
+    return {
+      ok: summary.fallbackCount === 0,
+      mode: summary.fallbackCount === 0 ? "native" : "unsupported",
+      id: summary.shapeId,
+      nativeCount: summary.nativeCount,
+      message: formatEquationConversionSummary(summary) ?? "原生公式转换完成。",
+    };
+  }
+
+  const guiRequest = buildShapeRangeEquationRequest("", request.text, request.equations, "inline");
+  const shapeId = await addRichTextBox(guiRequest.workingText, request.box, request.baseStyle ?? {}, request.runs ?? []);
+  await selectShapes([shapeId]);
+  const response = await convertShapeRangesToNativeEquations({ ...guiRequest, shapeId });
+  const selectedIds = await getSelectedShapeIds();
+  return {
+    ...response,
+    id: selectedIds[0] || shapeId,
+  };
 }
 
 export async function insertNativeEquationBlock(request: NativeEquationBlockRequest): Promise<NativeEquationConversionResponse> {
-  void request;
-  throw new Error("insertNativeEquationBlock 已弃用。请改为先用 Office.js 插入文本框并选中文本，再调用 convertSelectedTextToNativeEquation。");
+  const capabilities = await getPowerPointHostCapabilities();
+  if (capabilities.textRangeSelection) {
+    const shapeId = await addTextBox(request.latex, request.box, request.style ?? {});
+    await selectTextRange(shapeId, 0, request.latex.length);
+    const response = await convertSelectedTextToNativeEquation(request.latex, true);
+    const selectedIds = await getSelectedShapeIds();
+    return {
+      ...response,
+      id: selectedIds[0] || shapeId,
+    };
+  }
+
+  const guiRequest = buildShapeRangeEquationRequest(
+    "",
+    request.latex,
+    [{ start: 0, length: request.latex.length, latex: request.latex, display: true }],
+    "block",
+  );
+  const shapeId = await addTextBox(guiRequest.workingText, request.box, request.style ?? {});
+  await selectShapes([shapeId]);
+  const response = await convertShapeRangesToNativeEquations({ ...guiRequest, shapeId });
+  const selectedIds = await getSelectedShapeIds();
+  return {
+    ...response,
+    id: selectedIds[0] || shapeId,
+  };
 }
 
 export interface EquationRunConversionDeps {
@@ -192,6 +317,7 @@ export async function convertEquationRuns(
       messages.push(messageFromError(error));
       return {
         shapeId: currentShapeId,
+        strategy: "officejs-selection",
         nativeCount,
         fallbackCount: sortedEquations.length - nativeCount,
         messages,
@@ -202,6 +328,7 @@ export async function convertEquationRuns(
 
   return {
     shapeId: currentShapeId,
+    strategy: "officejs-selection",
     nativeCount,
     fallbackCount: 0,
     messages,

@@ -8,6 +8,11 @@ export interface SlidePageSize {
   warning?: string;
 }
 
+export interface PowerPointHostCapabilities {
+  textRangeSelection: boolean;
+  nativeTable: boolean;
+}
+
 const fallbackSlidePageSize: SlidePageSize = {
   width: 960,
   height: 540,
@@ -20,6 +25,19 @@ function ensurePowerPoint(): any {
     throw new Error("当前环境未检测到 PowerPoint Office.js。请在 PowerPoint 加载项中打开。");
   }
   return powerpoint;
+}
+
+function isRequirementSetSupported(version: string): boolean | undefined {
+  const OfficeApi = (globalThis as any).Office;
+  const checker = OfficeApi?.context?.requirements?.isSetSupported;
+  if (typeof checker !== "function") {
+    return undefined;
+  }
+  try {
+    return Boolean(checker("PowerPointApi", version));
+  } catch {
+    return undefined;
+  }
 }
 
 function toSlideShape(shape: OfficeShape): SlideShape {
@@ -164,6 +182,37 @@ export async function getSlidePageSize(): Promise<SlidePageSize> {
   });
 }
 
+export async function getPowerPointHostCapabilities(): Promise<PowerPointHostCapabilities> {
+  const textRangeRequirement = isRequirementSetSupported("1.6");
+  const nativeTableRequirement = isRequirementSetSupported("1.8");
+
+  return withCurrentSlide(async (context, slide) => {
+    const selectedShapes = context.presentation.getSelectedShapes();
+    selectedShapes.load("items/id");
+    await context.sync();
+
+    let textRangeSelection = textRangeRequirement;
+    if (selectedShapes.items?.length) {
+      try {
+        const shape = slide.shapes.getItem(String(selectedShapes.items[0].id));
+        const textRange = shape?.textFrame?.textRange;
+        const canGetSubstring = typeof textRange?.getSubstring === "function";
+        const substringRange = canGetSubstring ? textRange.getSubstring(0, 0) : undefined;
+        const canSelect = typeof substringRange?.setSelected === "function" || typeof substringRange?.select === "function";
+        textRangeSelection = canGetSubstring && canSelect;
+      } catch {
+        textRangeSelection = textRangeRequirement;
+      }
+    }
+
+    const nativeTable = nativeTableRequirement ?? (typeof slide.shapes?.addTable === "function");
+    return {
+      textRangeSelection: Boolean(textRangeSelection),
+      nativeTable: Boolean(nativeTable),
+    };
+  });
+}
+
 export async function addTextBox(text: string, box: Box, style: TextStyle = {}): Promise<string> {
   return withCurrentSlide(async (context, slide) => {
     if (!slide.shapes?.addTextBox) {
@@ -240,6 +289,11 @@ export async function selectTextRange(shapeId: string, start: number, length: nu
       throw new Error("当前 PowerPoint 版本不支持选择文本范围。");
     }
     const range = textRange.getSubstring(start, length);
+    if (typeof range?.setSelected === "function") {
+      range.setSelected();
+      await context.sync();
+      return;
+    }
     if (!range?.select) {
       throw new Error("当前 PowerPoint 版本不支持选择文本范围。");
     }
@@ -575,7 +629,7 @@ export async function addTableWithFallback(
       rows,
       box,
       errors,
-      nativeUnsupported ? "当前 PowerPoint 版本不支持原生表格，已降级为文本框网格。" : undefined,
+      nativeUnsupported ? "当前 PowerPoint 版本不支持 PowerPoint 原生表格，已使用文本框网格近似显示。" : undefined,
       nativeUnsupported ? "nativeTableUnsupported" : undefined,
     );
   } catch (error) {
