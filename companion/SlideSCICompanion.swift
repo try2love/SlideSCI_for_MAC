@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 
 struct CompanionConfig {
@@ -151,7 +150,6 @@ final class CompanionSupervisor {
   private let config: CompanionConfig
   private let helperService: ManagedProcess
   private let webService: ManagedProcess
-  private var helperStopDeadline: Date?
 
   init(config: CompanionConfig) {
     self.config = config
@@ -191,28 +189,7 @@ final class CompanionSupervisor {
 
   func tick() {
     ensureWebServiceRunning()
-
-    let powerpointRunning = isPowerPointRunning()
-    if powerpointRunning {
-      helperStopDeadline = nil
-      helperService.ensureRunning()
-      return
-    }
-
-    if !helperService.isRunning() {
-      return
-    }
-
-    if helperStopDeadline == nil {
-      helperStopDeadline = Date().addingTimeInterval(config.shutdownGracePeriod)
-      log("PowerPoint 已退出，等待 \(Int(config.shutdownGracePeriod)) 秒后停止 helper。")
-      return
-    }
-
-    if let helperStopDeadline, Date() >= helperStopDeadline {
-      helperService.stop(force: true)
-      self.helperStopDeadline = nil
-    }
+    ensureHelperRunning()
   }
 
   func shutdown() {
@@ -240,10 +217,18 @@ final class CompanionSupervisor {
     webService.ensureRunning()
   }
 
-  private func isPowerPointRunning() -> Bool {
-    NSWorkspace.shared.runningApplications.contains { app in
-      app.bundleIdentifier == config.powerpointBundleIdentifier && !app.isTerminated
+  private func ensureHelperRunning() {
+    guard let helperScript = config.helperScript, !helperScript.isEmpty else {
+      log("helper 配置不完整，已跳过启动。")
+      return
     }
+
+    guard FileManager.default.fileExists(atPath: helperScript) else {
+      log("helper 脚本不存在，已跳过启动。")
+      return
+    }
+
+    helperService.ensureRunning()
   }
 
   private func log(_ message: String) {

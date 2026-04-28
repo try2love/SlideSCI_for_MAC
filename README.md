@@ -63,7 +63,15 @@ node scripts/local-addin-server.mjs \
 6. 进入解压后的文件夹，双击：
    `install-slidesci-mac.command`
 
-   如果 macOS 阻止运行：
+   如果 macOS 反复阻止运行 `.command` 文件，先在终端执行：
+
+```bash
+xattr -dr com.apple.quarantine "/你的解压目录/SlideSCI-for-Mac-vX.Y.Z"
+```
+
+   然后再双击 `install-slidesci-mac.command`。
+
+   如果仍被阻止：
    - 右键该文件，选择“打开”
    - 再次点击“打开”
 
@@ -81,16 +89,26 @@ node scripts/local-addin-server.mjs \
 
 9. 安装完成后，重新打开 PowerPoint
 
-10. 在 PowerPoint 顶部 **“视图”** 选项卡右侧找到 **SlideSCI**
+10. 在 PowerPoint 顶部找到独立的 **SlideSCI** 选项卡
 
 11. 打开任务窗格后即可使用
 
 安装完成后的行为：
 
 - 本地 taskpane HTTPS 服务由 companion 保持可用，确保 PowerPoint 能稳定加载插件页面
-- PowerPoint 打开时，companion 会自动拉起公式 helper
-- PowerPoint 关闭后，helper 会在短暂宽限期后自动退出
+- companion 会常驻托管本地 helper，避免因 PowerPoint 进程识别不稳定导致公式功能失效
 - 不需要再手动运行 `npm run helper` 或 `npm run dev`
+
+如果你想不卸载而完全停掉 SlideSCI：
+
+1. 回到解压后的安装包目录
+2. 双击 `stop-slidesci-mac.command`
+3. 这会卸载 LaunchAgent，并停止 companion、helper 和本地 taskpane 服务
+
+如果之后想重新启用：
+
+1. 回到解压后的安装包目录
+2. 双击 `start-slidesci-mac.command`
 
 如需卸载：
 
@@ -200,7 +218,7 @@ Mac PowerPoint 本地侧载传统 XML manifest：
 ~/Library/Containers/com.microsoft.Powerpoint/Data/Documents/wef
 ```
 
-把 `manifest.xml` 放入该目录后完全退出并重启 PowerPoint。加载成功后，会在“视图”选项卡出现 `SlideSCI` 分组和“打开 SlideSCI”按钮；也可以从“加载项”入口查找 `SlideSCI for Mac`。
+把 `manifest.xml` 放入该目录后完全退出并重启 PowerPoint。加载成功后，会在顶部出现独立的 `SlideSCI` 选项卡和“打开 SlideSCI”按钮；也可以从“加载项”入口查找 `SlideSCI for Mac`。
 
 如果加载项不出现：
 

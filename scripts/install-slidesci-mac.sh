@@ -42,6 +42,10 @@ cleanup_tmp_files() {
 
 trap cleanup_tmp_files EXIT
 
+if command -v xattr >/dev/null 2>&1; then
+  xattr -dr com.apple.quarantine "$SCRIPT_DIR" >/dev/null 2>&1 || true
+fi
+
 read -r LOCAL_ADDIN_HOST LOCAL_ADDIN_PORT <<EOF
 $(python3 - "$MANIFEST_BASE_URL" <<'PY'
 import sys
@@ -259,6 +263,10 @@ cp "$TMP_MANIFEST" "$MANIFEST_DIR/manifest.xml"
 
 chmod +x "$BIN_DIR/SlideSCICompanion"
 
+if command -v xattr >/dev/null 2>&1; then
+  xattr -dr com.apple.quarantine "$INSTALL_ROOT" >/dev/null 2>&1 || true
+fi
+
 cat > "$LAUNCH_AGENT_PATH" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -319,8 +327,9 @@ echo "SlideSCI 已安装。"
 echo "1. manifest 已复制到 $MANIFEST_DIR/manifest.xml"
 echo "2. 本地任务窗格服务已就绪：${MANIFEST_BASE_URL}/health"
 echo "3. companion LaunchAgent 已注册：$LAUNCH_AGENT_PATH"
-echo "4. PowerPoint 打开后，公式 helper 会随 PowerPoint 自动启动。"
-echo "5. 请完全退出并重启 PowerPoint。插件入口现在位于“视图”选项卡。"
+echo "4. 公式 helper 现在由 companion 常驻托管，本地地址为 http://127.0.0.1:17926"
+echo "5. 如果你想临时完全关停 SlideSCI，请双击 stop-slidesci-mac.command；恢复时双击 start-slidesci-mac.command。"
+echo "6. 请完全退出并重启 PowerPoint。插件入口现在位于顶部 SlideSCI 选项卡。"
 if [ -n "$TASKPANE_URL" ]; then
-  echo "6. Taskpane 地址：$TASKPANE_URL"
+  echo "7. Taskpane 地址：$TASKPANE_URL"
 fi

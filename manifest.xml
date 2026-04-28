@@ -35,7 +35,8 @@
           </GetStarted>
           <FunctionFile resid="Taskpane.Url" />
           <ExtensionPoint xsi:type="PrimaryCommandSurface">
-            <OfficeTab id="TabView">
+            <CustomTab id="SlideSCI.Tab">
+              <Label resid="Tab.Label" />
               <Group id="SlideSCI.Group">
                 <Label resid="Group.Label" />
                 <Icon>
@@ -60,7 +61,7 @@
                   </Action>
                 </Control>
               </Group>
-            </OfficeTab>
+            </CustomTab>
           </ExtensionPoint>
         </DesktopFormFactor>
       </Host>
@@ -76,13 +77,14 @@
         <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://github.com/Achuan-2/SlideSCI" />
       </bt:Urls>
       <bt:ShortStrings>
+        <bt:String id="Tab.Label" DefaultValue="SlideSCI" />
         <bt:String id="Group.Label" DefaultValue="SlideSCI" />
         <bt:String id="OpenTaskpane.Label" DefaultValue="打开 SlideSCI" />
         <bt:String id="GetStarted.Title" DefaultValue="SlideSCI for Mac 已加载" />
       </bt:ShortStrings>
       <bt:LongStrings>
         <bt:String id="OpenTaskpane.Tooltip" DefaultValue="打开 SlideSCI for Mac 任务窗格。" />
-        <bt:String id="GetStarted.Description" DefaultValue="从“视图”选项卡中的 SlideSCI 分组打开任务窗格。" />
+        <bt:String id="GetStarted.Description" DefaultValue="从顶部 SlideSCI 选项卡打开任务窗格。" />
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>
