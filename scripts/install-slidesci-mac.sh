@@ -1,7 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SOURCE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALL_ROOT="${HOME}/Library/Application Support/SlideSCI"
 BIN_DIR="$INSTALL_ROOT/bin"
 HELPER_DIR="$INSTALL_ROOT/helper"
@@ -11,10 +12,14 @@ LAUNCH_AGENT_ID="com.slidesci.helper-watcher"
 LAUNCH_AGENT_PATH="$LAUNCH_AGENT_DIR/$LAUNCH_AGENT_ID.plist"
 MANIFEST_BASE_URL="${1:-https://localhost:3000}"
 TMP_MANIFEST="$(mktemp /tmp/slidesci-manifest.XXXXXX.xml)"
-SOURCE_HELPER_SCRIPT="$ROOT_DIR/scripts/native-equation-helper.mjs"
-BUNDLED_HELPER_SCRIPT="$ROOT_DIR/helper/native-equation-helper.mjs"
-SOURCE_COMPANION_BIN="$ROOT_DIR/bin/SlideSCICompanion"
-BUNDLED_MANIFEST="$ROOT_DIR/manifest.xml"
+PACKAGE_HELPER_SCRIPT="$SCRIPT_DIR/helper/native-equation-helper.mjs"
+SOURCE_HELPER_SCRIPT="$SOURCE_ROOT/scripts/native-equation-helper.mjs"
+PACKAGE_COMPANION_BIN="$SCRIPT_DIR/bin/SlideSCICompanion"
+SOURCE_COMPANION_BIN="$SOURCE_ROOT/bin/SlideSCICompanion"
+PACKAGE_MANIFEST="$SCRIPT_DIR/manifest.xml"
+SOURCE_MANIFEST="$SOURCE_ROOT/manifest.xml"
+BUILD_COMPANION_SCRIPT="$SOURCE_ROOT/scripts/build-companion.sh"
+RENDER_MANIFEST_SCRIPT="$SOURCE_ROOT/scripts/render-manifest.mjs"
 
 NODE_BIN="$(command -v node || true)"
 if [ -z "$NODE_BIN" ]; then
@@ -25,24 +30,41 @@ fi
 
 mkdir -p "$BIN_DIR" "$HELPER_DIR" "$MANIFEST_DIR" "$LAUNCH_AGENT_DIR"
 
-if [ -x "$SOURCE_COMPANION_BIN" ]; then
+if [ -x "$PACKAGE_COMPANION_BIN" ]; then
+  cp "$PACKAGE_COMPANION_BIN" "$BIN_DIR/SlideSCICompanion"
+elif [ -x "$SOURCE_COMPANION_BIN" ]; then
   cp "$SOURCE_COMPANION_BIN" "$BIN_DIR/SlideSCICompanion"
+elif [ -f "$BUILD_COMPANION_SCRIPT" ]; then
+  bash "$BUILD_COMPANION_SCRIPT" "$BIN_DIR"
 else
-  bash "$ROOT_DIR/scripts/build-companion.sh" "$BIN_DIR"
+  echo "未找到 SlideSCICompanion。"
+  echo "如果你是从 GitHub Release 安装，请确认 zip 已完整解压，并保留 bin/ 文件夹。"
+  echo "如果你是从源码安装，请确认仓库结构完整。"
+  exit 1
 fi
 
-if [ -f "$BUNDLED_HELPER_SCRIPT" ]; then
-  cp "$BUNDLED_HELPER_SCRIPT" "$HELPER_DIR/native-equation-helper.mjs"
-else
+if [ -f "$PACKAGE_HELPER_SCRIPT" ]; then
+  cp "$PACKAGE_HELPER_SCRIPT" "$HELPER_DIR/native-equation-helper.mjs"
+elif [ -f "$SOURCE_HELPER_SCRIPT" ]; then
   cp "$SOURCE_HELPER_SCRIPT" "$HELPER_DIR/native-equation-helper.mjs"
+else
+  echo "未找到 native-equation-helper.mjs。"
+  echo "如果你是从 GitHub Release 安装，请确认 zip 已完整解压，并保留 helper/ 文件夹。"
+  echo "如果你是从源码安装，请确认仓库结构完整。"
+  exit 1
 fi
 
-if [ -f "$BUNDLED_MANIFEST" ]; then
-  cp "$BUNDLED_MANIFEST" "$MANIFEST_DIR/manifest.xml"
-else
-  node "$ROOT_DIR/scripts/render-manifest.mjs" "$MANIFEST_BASE_URL" "$TMP_MANIFEST"
+if [ -f "$PACKAGE_MANIFEST" ]; then
+  cp "$PACKAGE_MANIFEST" "$MANIFEST_DIR/manifest.xml"
+elif [ -f "$SOURCE_MANIFEST" ]; then
+  cp "$SOURCE_MANIFEST" "$MANIFEST_DIR/manifest.xml"
+elif [ -f "$RENDER_MANIFEST_SCRIPT" ]; then
+  node "$RENDER_MANIFEST_SCRIPT" "$MANIFEST_BASE_URL" "$TMP_MANIFEST"
   cp "$TMP_MANIFEST" "$MANIFEST_DIR/manifest.xml"
   rm -f "$TMP_MANIFEST"
+else
+  echo "未找到 manifest.xml，也无法动态生成 manifest。"
+  exit 1
 fi
 
 cat > "$LAUNCH_AGENT_PATH" <<PLIST
