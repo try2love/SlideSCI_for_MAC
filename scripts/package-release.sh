@@ -16,8 +16,10 @@ ARTIFACT_NAME="SlideSCI-for-Mac-v${VERSION}"
 STAGE_DIR="${RELEASE_ROOT}/${ARTIFACT_NAME}"
 HELPER_STAGE_DIR="${STAGE_DIR}/helper"
 BIN_STAGE_DIR="${STAGE_DIR}/bin"
+RELEASE_NOTES_PATH="${RELEASE_ROOT}/release-notes-v${VERSION}.md"
 
 rm -rf "$STAGE_DIR"
+rm -f "$RELEASE_NOTES_PATH"
 
 npm run build >/dev/null
 mkdir -p "$HELPER_STAGE_DIR" "$BIN_STAGE_DIR"
@@ -27,7 +29,14 @@ node "$ROOT_DIR/scripts/render-manifest.mjs" "$ADDIN_BASE_URL" "$STAGE_DIR/manif
 cp "$ROOT_DIR/scripts/native-equation-helper.mjs" "$HELPER_STAGE_DIR/native-equation-helper.mjs"
 cp "$ROOT_DIR/scripts/install-slidesci-mac.sh" "$STAGE_DIR/install-slidesci-mac.sh"
 cp "$ROOT_DIR/scripts/uninstall-slidesci-mac.sh" "$STAGE_DIR/uninstall-slidesci-mac.sh"
-chmod +x "$STAGE_DIR/install-slidesci-mac.sh" "$STAGE_DIR/uninstall-slidesci-mac.sh" "$BIN_STAGE_DIR/SlideSCICompanion"
+cp "$ROOT_DIR/scripts/install-slidesci-mac.sh" "$STAGE_DIR/install-slidesci-mac.command"
+cp "$ROOT_DIR/scripts/uninstall-slidesci-mac.sh" "$STAGE_DIR/uninstall-slidesci-mac.command"
+chmod +x \
+  "$STAGE_DIR/install-slidesci-mac.sh" \
+  "$STAGE_DIR/uninstall-slidesci-mac.sh" \
+  "$STAGE_DIR/install-slidesci-mac.command" \
+  "$STAGE_DIR/uninstall-slidesci-mac.command" \
+  "$BIN_STAGE_DIR/SlideSCICompanion"
 
 cat > "$STAGE_DIR/README.txt" <<EOF
 SlideSCI for Mac v${VERSION}
@@ -35,6 +44,7 @@ SlideSCI for Mac v${VERSION}
 安装步骤：
 1. 确保 PowerPoint 已完全退出。
 2. 双击或在终端运行 install-slidesci-mac.sh。
+   推荐直接双击 install-slidesci-mac.command。
 3. 完全重启 PowerPoint。
 4. 在“视图”选项卡右侧找到 SlideSCI。
 
@@ -44,9 +54,12 @@ SlideSCI for Mac v${VERSION}
 - 加载项前端地址：${ADDIN_BASE_URL}
 EOF
 
+node "$ROOT_DIR/scripts/generate-release-notes.mjs" "v${VERSION}" "$ADDIN_BASE_URL" "$RELEASE_NOTES_PATH"
+
 (cd "$RELEASE_ROOT" && /usr/bin/zip -qry "${ARTIFACT_NAME}.zip" "$ARTIFACT_NAME")
 (cd "$RELEASE_ROOT" && /usr/bin/shasum -a 256 "${ARTIFACT_NAME}.zip" > "${ARTIFACT_NAME}.sha256")
 
 echo "Release artifacts:"
 echo "  ${RELEASE_ROOT}/${ARTIFACT_NAME}.zip"
 echo "  ${RELEASE_ROOT}/${ARTIFACT_NAME}.sha256"
+echo "  ${RELEASE_NOTES_PATH}"

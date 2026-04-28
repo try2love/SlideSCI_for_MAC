@@ -94,6 +94,12 @@ git push origin main --tags
 2. 生成 `SlideSCI-for-Mac-v0.1.2.zip`
 3. 在 Releases 页面创建对应版本并附上安装包
 
+对最终用户来说：
+
+- 只需要下载 `SlideSCI-for-Mac-vX.Y.Z.zip`
+- `*.sha256` 只是校验文件，可选
+- GitHub 自动生成的 `Source code` 不用于安装
+
 Mac PowerPoint 本地侧载传统 XML manifest：
 
 ```text
