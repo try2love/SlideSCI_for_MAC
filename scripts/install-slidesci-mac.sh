@@ -22,6 +22,7 @@ CERT_PATH="$CERT_DIR/slidesci-local-cert.pem"
 KEY_PATH="$CERT_DIR/slidesci-local-key.pem"
 TMP_MANIFEST="$(mktemp /tmp/slidesci-manifest.XXXXXX.xml)"
 TMP_OPENSSL_CONFIG="$(mktemp /tmp/slidesci-openssl.XXXXXX.cnf)"
+TMP_AUTOMATION_PROBE="$(mktemp /tmp/slidesci-automation-probe.XXXXXX.applescript)"
 
 PACKAGE_HELPER_SCRIPT="$SCRIPT_DIR/helper/native-equation-helper.mjs"
 SOURCE_HELPER_SCRIPT="$SOURCE_ROOT/scripts/native-equation-helper.mjs"
@@ -37,7 +38,7 @@ BUILD_COMPANION_SCRIPT="$SOURCE_ROOT/scripts/build-companion.sh"
 RENDER_MANIFEST_SCRIPT="$SOURCE_ROOT/scripts/render-manifest.mjs"
 
 cleanup_tmp_files() {
-  rm -f "$TMP_MANIFEST" "$TMP_OPENSSL_CONFIG"
+  rm -f "$TMP_MANIFEST" "$TMP_OPENSSL_CONFIG" "$TMP_AUTOMATION_PROBE"
 }
 
 trap cleanup_tmp_files EXIT
@@ -243,6 +244,16 @@ wait_for_local_server() {
   exit 1
 }
 
+request_permission_probe() {
+  cat > "$TMP_AUTOMATION_PROBE" <<'EOF'
+tell application "System Events"
+  return UI elements enabled
+end tell
+EOF
+
+  "$BIN_DIR/SlideSCICompanion" --run-applescript-file "$TMP_AUTOMATION_PROBE" >/dev/null 2>&1 || true
+}
+
 require_command "python3" "未检测到 python3，无法安装 SlideSCI。"
 require_command "node" "未检测到 node。当前安装脚本仍需要 node 运行 helper 和本地任务窗格服务。请先安装 Node.js LTS。"
 require_command "openssl" "未检测到 openssl，无法生成本地 HTTPS 证书。"
@@ -320,6 +331,7 @@ launchctl unload "$LAUNCH_AGENT_PATH" >/dev/null 2>&1 || true
 launchctl load "$LAUNCH_AGENT_PATH"
 
 wait_for_local_server "${MANIFEST_BASE_URL}/health"
+request_permission_probe
 
 TASKPANE_URL="$(extract_taskpane_url "$TMP_MANIFEST" || true)"
 
@@ -328,9 +340,10 @@ echo "1. manifest 已复制到 $MANIFEST_DIR/manifest.xml"
 echo "2. 本地任务窗格服务已就绪：${MANIFEST_BASE_URL}/health"
 echo "3. companion LaunchAgent 已注册：$LAUNCH_AGENT_PATH"
 echo "4. PowerPoint 打开时，公式 helper 会由 SlideSCICompanion 自动拉起；PowerPoint 完全退出后会自动停止。"
-echo "5. 如需公式自动转换，请在“系统设置 > 隐私与安全性 > 辅助功能”中允许 SlideSCICompanion 控制电脑。"
-echo "6. 如果你想临时完全关停 SlideSCI，请双击 stop-slidesci-mac.command；恢复时双击 start-slidesci-mac.command。"
-echo "7. 请完全退出并重启 PowerPoint。插件入口现在位于顶部 SlideSCI 选项卡。"
+echo "5. 如需公式自动转换，请在“系统设置 > 隐私与安全性 > 自动化”中允许 SlideSCICompanion 控制 System Events。"
+echo "6. 同时请在“系统设置 > 隐私与安全性 > 辅助功能”中允许 SlideSCICompanion 控制电脑。"
+echo "7. 如果你想临时完全关停 SlideSCI，请双击 stop-slidesci-mac.command；恢复时双击 start-slidesci-mac.command。"
+echo "8. 请完全退出并重启 PowerPoint。插件入口位于“开始”选项卡中的 SlideSCI 分组里的“打开 SlideSCI”按钮；如未直接显示，也可从“加载项”中选择 SlideSCI。"
 if [ -n "$TASKPANE_URL" ]; then
-  echo "8. Taskpane 地址：$TASKPANE_URL"
+  echo "9. Taskpane 地址：$TASKPANE_URL"
 fi

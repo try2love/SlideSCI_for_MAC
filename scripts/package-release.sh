@@ -73,9 +73,12 @@ SlideSCI for Mac v${VERSION}
    - 生成并信任本地 HTTPS 证书
    - 注册 launchd LaunchAgent
    - 复制 manifest.xml 到 PowerPoint 侧载目录
-7. 如果系统弹出权限提示，请允许 SlideSCICompanion 控制电脑，并允许辅助功能权限。
+7. 如果系统弹出权限提示，请允许：
+   - SlideSCICompanion 在“自动化”中控制 System Events
+   - SlideSCICompanion 在“辅助功能”中控制电脑
 8. 安装完成后，重新打开 PowerPoint。
-9. 在 PowerPoint 顶部找到独立的 SlideSCI 选项卡。
+9. 在 PowerPoint 的“开始”选项卡中找到 SlideSCI 分组里的“打开 SlideSCI”按钮；如果没有直接显示，也可以先打开“加载项”，再选择 SlideSCI。
+10. 点击后会打开右侧的 SlideSCI 任务窗格。
 
 说明：
 - 本安装包运行时不依赖 GitHub Pages；任务窗格页面、helper 和 companion 都使用本机资源。

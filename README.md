@@ -18,7 +18,12 @@ npm run dev
 npm run helper
 ```
 
-helper 监听 `http://127.0.0.1:17926`，负责通过 PowerPoint 自动化创建原生公式文本框。安装版默认通过 `SlideSCICompanion` 执行界面自动化；首次使用时 macOS 可能要求在“系统设置 > 隐私与安全性 > 辅助功能”中允许 `SlideSCICompanion` 控制电脑，否则含公式模块会失败并在状态栏显示原因，不会静默降级成图片。
+helper 监听 `http://127.0.0.1:17926`，负责通过 PowerPoint 自动化创建原生公式文本框。安装版默认通过 `SlideSCICompanion` 执行界面自动化；首次使用公式功能时，通常需要在“系统设置 > 隐私与安全性”中同时完成两项授权：
+
+- `自动化`：允许 `SlideSCICompanion` 控制 `System Events`
+- `辅助功能`：允许 `SlideSCICompanion` 控制电脑
+
+否则含公式模块会失败并在状态栏显示原因，不会静默降级成图片。
 
 如果你想模拟最终用户的“全本地安装包”运行方式，而不是开发服务器模式，可以先构建前端，再启动本地任务窗格 HTTPS 服务：
 
@@ -79,11 +84,12 @@ xattr -dr com.apple.quarantine "/你的解压目录/SlideSCI-for-Mac-vX.Y.Z"
    - 复制 `manifest.xml` 到 PowerPoint 的侧载目录
 8. 首次使用时，如果系统弹出权限提示，请允许：
 
-   - `SlideSCICompanion` 控制电脑
-   - 辅助功能权限
+   - `SlideSCICompanion` 在“自动化”中控制 `System Events`
+   - `SlideSCICompanion` 在“辅助功能”中控制电脑
 9. 安装完成后，重新打开 PowerPoint
-10. 在 PowerPoint 顶部找到独立的 **SlideSCI** 选项卡
-11. 打开任务窗格后即可使用
+10. 在 PowerPoint 的 **“开始”** 选项卡中找到 **SlideSCI** 分组里的 **“打开 SlideSCI”** 按钮
+11. 如果没有直接显示，可以先打开 **“加载项”**，再选择 **SlideSCI**
+12. 点击后会打开右侧的 SlideSCI 任务窗格
 
 安装完成后的行为：
 
@@ -209,7 +215,7 @@ Mac PowerPoint 本地侧载传统 XML manifest：
 ~/Library/Containers/com.microsoft.Powerpoint/Data/Documents/wef
 ```
 
-把 `manifest.xml` 放入该目录后完全退出并重启 PowerPoint。加载成功后，会在顶部出现独立的 `SlideSCI` 选项卡，里面按“内容插入 / 图片工具 / 格式工具”分组展示按钮；也可以从“加载项”入口查找 `SlideSCI for Mac`。
+把 `manifest.xml` 放入该目录后完全退出并重启 PowerPoint。加载成功后，会在 **“开始”** 选项卡中出现 `SlideSCI` 分组和 **“打开 SlideSCI”** 按钮；如果没有直接显示，也可以从 **“加载项”** 入口查找 `SlideSCI for Mac`。点击后会打开右侧任务窗格。
 
 如果加载项不出现：
 

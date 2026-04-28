@@ -240,10 +240,6 @@ on raiseScriptError(prefixText, errMsg, errNum)
 end raiseScriptError
 
 on ensureFocusedEditableElement(processName)
-  tell application "${POWERPOINT_PROCESS_NAME}"
-    activate
-  end tell
-  delay 0.12
   tell application "System Events"
     if UI elements enabled is false then
       error "macOS 未授予辅助功能权限，helper 无法驱动 PowerPoint 界面。"
@@ -333,10 +329,6 @@ export function buildConvertSelectionScript(payload = {}) {
   normalizeLatexInput(payload.latex);
   return buildEquationAutomationScript(
     `
-tell application "${POWERPOINT_PROCESS_NAME}"
-  activate
-end tell
-delay 0.12
 tell application "System Events"
   if UI elements enabled is false then
     error "macOS 未授予辅助功能权限，helper 无法驱动 PowerPoint 界面。"
@@ -376,14 +368,19 @@ return "equation-insert"
 
 function guiAutomationMessage(error) {
   const message = error instanceof Error ? error.message : String(error);
-  if (/not authorized|not permitted|-1743|辅助功能|accessibility/i.test(message)) {
+  if (/not authorized to send apple events|apple events.*not permitted|-1743|system events/i.test(message)) {
+    return APPLESCRIPT_RUNNER
+      ? "已检测到 PowerPoint，但 helper 缺少 macOS 自动化权限。请在“系统设置 > 隐私与安全性 > 自动化”中允许 SlideSCICompanion 控制 System Events；如果列表中也出现 Microsoft PowerPoint，请一并打开，然后重新打开 PowerPoint。"
+      : "已检测到 PowerPoint，但 helper 缺少 macOS 自动化权限。请在“系统设置 > 隐私与安全性 > 自动化”中允许终端或 Node 控制 System Events。";
+  }
+  if (/辅助功能|accessibility|ui elements enabled|AXErrorAPIDisabled/i.test(message)) {
     return APPLESCRIPT_RUNNER
       ? "已检测到 PowerPoint，但 helper 缺少 macOS 辅助功能权限。请在“系统设置 > 隐私与安全性 > 辅助功能”中允许 SlideSCICompanion 控制电脑，然后重新打开 PowerPoint。"
       : "已检测到 PowerPoint，但 helper 缺少 macOS 辅助功能权限。请在“系统设置 > 隐私与安全性 > 辅助功能”中允许终端或 Node 控制电脑。";
   }
   return APPLESCRIPT_RUNNER
-    ? `已检测到 PowerPoint，但界面自动化不可用：${message}。请确认已允许 SlideSCICompanion 控制电脑，并保持 PowerPoint 窗口处于前台。`
-    : `已检测到 PowerPoint，但界面自动化不可用：${message}。请确认已允许终端或 Node 控制 Microsoft PowerPoint，并保持 PowerPoint 窗口处于前台。`;
+    ? `已检测到 PowerPoint，但界面自动化不可用：${message}。请确认已在“自动化”中允许 SlideSCICompanion 控制 System Events，并在“辅助功能”中允许其控制电脑，同时保持 PowerPoint 窗口处于前台。`
+    : `已检测到 PowerPoint，但界面自动化不可用：${message}。请确认已在“自动化”中允许终端或 Node 控制 System Events，并保持 PowerPoint 窗口处于前台。`;
 }
 
 async function isPowerPointRunning() {

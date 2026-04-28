@@ -30,9 +30,12 @@ xattr -dr com.apple.quarantine "/你的解压目录/${artifactName.replace(".zip
 6. 如果仍被阻止，再右键该文件，选择“打开”，再确认一次
 7. 按系统提示允许脚本运行，并完成安装
 8. 安装脚本会同时安装本地任务窗格 HTTPS 服务，并在首次安装时把本地证书加入登录钥匙串
-9. 如果系统弹出权限提示，请允许 \`SlideSCICompanion\` 控制电脑，并允许辅助功能权限
+9. 如果系统弹出权限提示，请允许：
+   - \`SlideSCICompanion\` 在“自动化”中控制 \`System Events\`
+   - \`SlideSCICompanion\` 在“辅助功能”中控制电脑
 10. 重新打开 PowerPoint
-11. 在 PowerPoint 顶部找到独立的 **SlideSCI** 选项卡
+11. 在 PowerPoint 的 **“开始”** 选项卡中找到 **SlideSCI** 分组里的 **“打开 SlideSCI”** 按钮；如果没有直接显示，也可以先打开 **“加载项”**，再选择 **SlideSCI**
+12. 点击后会打开右侧的 SlideSCI 任务窗格
 
 ## 文件说明
 
