@@ -8,6 +8,8 @@
     "dev": "vite --host 0.0.0.0",
     "helper": "node scripts/native-equation-helper.mjs",
     "manifest:dev": "node scripts/render-manifest.mjs https://localhost:3000",
+    "manifest:local": "node scripts/render-manifest.mjs https://127.0.0.1:18443",
+    "taskpane:local": "node scripts/local-addin-server.mjs",
     "companion:build": "bash scripts/build-companion.sh",
     "release:package": "bash scripts/package-release.sh",
     "install:mac": "bash scripts/install-slidesci-mac.sh",

@@ -20,9 +20,23 @@ npm run helper
 
 helper 监听 `http://127.0.0.1:17926`，负责通过 PowerPoint 自动化创建原生公式文本框。首次使用时 macOS 可能要求允许终端或 Node 自动化控制 Microsoft PowerPoint；如果拒绝，含公式模块会失败并在状态栏显示原因，不会静默降级成图片。
 
+如果你想模拟最终用户的“全本地安装包”运行方式，而不是开发服务器模式，可以先构建前端，再启动本地任务窗格 HTTPS 服务：
+
+```bash
+npm run build
+node scripts/local-addin-server.mjs \
+  --root dist \
+  --cert ~/Library/Application\ Support/SlideSCI/certs/slidesci-local-cert.pem \
+  --key ~/Library/Application\ Support/SlideSCI/certs/slidesci-local-key.pem
+```
+
 ## 安装给最终用户
 
-普通用户推荐直接使用 GitHub Release 安装，不需要先了解仓库结构。
+普通用户推荐直接使用 GitHub Release 安装，不需要先了解仓库结构。当前 release 包是**完全本地运行**的：
+
+- taskpane 页面来自本机 HTTPS 服务
+- 原生公式 helper 来自本机 helper 进程
+- 不依赖 GitHub Pages 才能运行
 
 ### 方式 A：从 GitHub Release 安装（推荐）
 
@@ -40,7 +54,7 @@ helper 监听 `http://127.0.0.1:17926`，负责通过 PowerPoint 自动化创建
 3. 如果你的 Mac 还没有安装 Node.js，请先安装 Node.js LTS  
    官方下载页：`https://nodejs.org/`
 
-   当前版本仍依赖本机 `node` 来运行本地公式 helper；如果没有 `node`，安装脚本会退出。
+   当前版本仍依赖本机 `node` 来运行本地公式 helper 和本地 taskpane 服务；如果没有 `node`，安装脚本会退出。
 
 4. 在安装前，先完全退出 Microsoft PowerPoint
 
@@ -56,6 +70,8 @@ helper 监听 `http://127.0.0.1:17926`，负责通过 PowerPoint 自动化创建
 7. 安装脚本会自动完成这些事情：
    - 安装 `SlideSCICompanion`
    - 复制本地公式 helper
+   - 复制本地 taskpane 页面和本地 HTTPS 服务
+   - 生成并信任本地 HTTPS 证书
    - 注册 `launchd` 用户级 LaunchAgent
    - 复制 `manifest.xml` 到 PowerPoint 的侧载目录
 
@@ -71,9 +87,10 @@ helper 监听 `http://127.0.0.1:17926`，负责通过 PowerPoint 自动化创建
 
 安装完成后的行为：
 
-- PowerPoint 打开时，companion 会自动拉起 helper
+- 本地 taskpane HTTPS 服务由 companion 保持可用，确保 PowerPoint 能稳定加载插件页面
+- PowerPoint 打开时，companion 会自动拉起公式 helper
 - PowerPoint 关闭后，helper 会在短暂宽限期后自动退出
-- 不需要再手动运行 `npm run helper`
+- 不需要再手动运行 `npm run helper` 或 `npm run dev`
 
 如需卸载：
 
@@ -117,45 +134,38 @@ npm run dev
 npm run helper
 ```
 
-6. 按下文的 `wef` 目录说明，把 `manifest.xml` 复制到 PowerPoint 侧载目录
-
-7. 完全退出并重启 PowerPoint
-
-如果你想按“接近最终用户”的方式从源码安装，而不是分别手动跑服务，可以使用：
+6. 执行本地安装脚本：
 
 ```bash
-npm run build
 npm run install:mac
 ```
 
-这个脚本会：
+7. 这个脚本会：
 
 1. 编译本地 `SlideSCICompanion` watcher
 2. 复制 helper 到 `~/Library/Application Support/SlideSCI/`
-3. 注册 `launchd` 用户级 LaunchAgent，让 companion 常驻监听 PowerPoint 进程
-4. 复制 `manifest.xml` 到 PowerPoint 的 `wef` 侧载目录
+3. 复制本地 taskpane 页面和本地 HTTPS 服务
+4. 生成并信任本地 HTTPS 证书
+5. 注册 `launchd` 用户级 LaunchAgent，让 companion 常驻监听 PowerPoint 进程
+6. 复制 `manifest.xml` 到 PowerPoint 的 `wef` 侧载目录
+
+8. 完全退出并重启 PowerPoint
 
 ## GitHub 发布
 
 仓库已经加入两条 GitHub Actions 工作流：
 
-- `pages.yml`：当 `main` 更新时，自动把 `dist/` 发布到 GitHub Pages。
 - `release.yml`：当推送 `v*` tag 时，在 macOS runner 上自动：
   - 构建前端
   - 编译 `SlideSCICompanion`
-  - 渲染面向 GitHub Pages 的 `manifest.xml`
+  - 渲染面向本地 `https://127.0.0.1:18443` 的 `manifest.xml`
   - 打包 release zip
   - 创建 GitHub Release 并上传附件
-
-首次使用前，请在 GitHub 仓库设置中确认：
-
-- `Settings -> Pages -> Build and deployment`
-- Source 选择 `GitHub Actions`
 
 本地也可以先手动打包预览：
 
 ```bash
-npm run release:package -- v0.1.2 https://try2love.github.io/SlideSCI_for_MAC
+npm run release:package -- v0.1.2
 ```
 
 生成物会出现在：
@@ -175,9 +185,8 @@ git push origin main --tags
 
 随后 GitHub 会自动：
 
-1. 用 Pages 托管前端页面
-2. 生成 `SlideSCI-for-Mac-v0.1.2.zip`
-3. 在 Releases 页面创建对应版本并附上安装包
+1. 生成 `SlideSCI-for-Mac-v0.1.2.zip`
+2. 在 Releases 页面创建对应版本并附上安装包
 
 对最终用户来说：
 
@@ -199,7 +208,8 @@ Mac PowerPoint 本地侧载传统 XML manifest：
 2. 确认复制的是 `manifest.xml` 文件本身，不是 `slidesci_for_mac` 文件夹。
 3. 删除旧 manifest 后重新复制新版 `manifest.xml`，再完全退出 PowerPoint。
 4. 清理 Office 缓存后再试：删除 `~/Library/Containers/com.microsoft.Powerpoint/Data/Library/Caches` 下的 Office 相关缓存。
-5. 确认 `npm run dev` 正在运行，并且 Safari 可以打开 `https://localhost:3000/index.html`。
+5. 如果你使用 release 安装方式，请查看 `~/Library/Application Support/SlideSCI/companion.log`，确认本地 taskpane 服务已经启动。
+6. 如果你使用源码开发方式，请确认 `npm run dev` 正在运行，并且 Safari 可以打开 `https://localhost:3000/index.html`。
 
 ## 当前功能
 

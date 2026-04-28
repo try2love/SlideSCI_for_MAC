@@ -1,7 +1,7 @@
 import { writeFile } from "node:fs/promises";
 
 const versionArg = process.argv[2];
-const addinBaseUrl = (process.argv[3] || "https://try2love.github.io/SlideSCI_for_MAC").replace(/\/+$/, "");
+const addinBaseUrl = (process.argv[3] || "https://127.0.0.1:18443").replace(/\/+$/, "");
 const outputPath = process.argv[4];
 
 if (!versionArg || !outputPath) {
@@ -23,9 +23,10 @@ const body = `## 安装
 4. 双击运行 \`install-slidesci-mac.command\`
 5. 如果 macOS 阻止运行，请右键该文件，选择“打开”，再确认一次
 6. 按系统提示允许脚本运行，并完成安装
-7. 如果系统弹出权限提示，请允许终端或 Node 控制 Microsoft PowerPoint，并允许辅助功能权限
-8. 重新打开 PowerPoint
-9. 在 **“视图”** 选项卡右侧找到 **SlideSCI**
+7. 安装脚本会同时安装本地任务窗格 HTTPS 服务，并在首次安装时把本地证书加入登录钥匙串
+8. 如果系统弹出权限提示，请允许终端或 Node 控制 Microsoft PowerPoint，并允许辅助功能权限
+9. 重新打开 PowerPoint
+10. 在 **“视图”** 选项卡右侧找到 **SlideSCI**
 
 ## 文件说明
 
@@ -35,8 +36,8 @@ const body = `## 安装
 
 ## 当前前提
 
-- 当前版本仍要求本机已安装 Node.js，因为本地公式 helper 还通过 Node 运行
-- 加载项前端页面地址：${addinBaseUrl}
+- 当前版本仍要求本机已安装 Node.js，因为本地公式 helper 和本地任务窗格服务都通过 Node 运行
+- 运行时不依赖 GitHub Pages；加载项页面默认由本机地址提供：${addinBaseUrl}
 
 ## 卸载
 

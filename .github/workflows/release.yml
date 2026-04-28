@@ -19,7 +19,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: bash scripts/package-release.sh "${GITHUB_REF_NAME}" "https://try2love.github.io/SlideSCI_for_MAC"
+      - run: bash scripts/package-release.sh "${GITHUB_REF_NAME}" "https://127.0.0.1:18443"
       - uses: softprops/action-gh-release@v2
         with:
           body_path: dist/release/release-notes-${{ github.ref_name }}.md

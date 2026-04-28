@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 
 const templatePath = new URL("../manifest.template.xml", import.meta.url);
-const baseUrl = (process.argv[2] || "https://localhost:3000").replace(/\/+$/, "");
+const baseUrl = (process.argv[2] || "https://127.0.0.1:18443").replace(/\/+$/, "");
 const outputPath = process.argv[3]
   ? new URL(`file://${process.argv[3]}`)
   : new URL("../manifest.xml", import.meta.url);

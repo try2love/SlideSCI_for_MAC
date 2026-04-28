@@ -5,6 +5,13 @@ struct CompanionConfig {
   var helperCommand: String
   var helperScript: String?
   var helperPort: Int
+  var webCommand: String
+  var webScript: String?
+  var webRoot: String?
+  var webHost: String
+  var webPort: Int
+  var webCert: String?
+  var webKey: String?
   var pollInterval: TimeInterval
   var shutdownGracePeriod: TimeInterval
   var powerpointBundleIdentifier: String
@@ -15,6 +22,13 @@ enum ArgKey: String {
   case helperCommand = "--helper-command"
   case helperScript = "--helper-script"
   case helperPort = "--helper-port"
+  case webCommand = "--web-command"
+  case webScript = "--web-script"
+  case webRoot = "--web-root"
+  case webHost = "--host"
+  case webPort = "--web-port"
+  case webCert = "--web-cert"
+  case webKey = "--web-key"
   case pollInterval = "--poll-interval"
   case shutdownGracePeriod = "--shutdown-grace-period"
   case powerpointBundleIdentifier = "--powerpoint-bundle-id"
@@ -38,6 +52,13 @@ func parseArguments() -> CompanionConfig {
     helperCommand: values[ArgKey.helperCommand.rawValue] ?? "/usr/bin/env",
     helperScript: values[ArgKey.helperScript.rawValue],
     helperPort: Int(values[ArgKey.helperPort.rawValue] ?? "17926") ?? 17926,
+    webCommand: values[ArgKey.webCommand.rawValue] ?? "/usr/bin/env",
+    webScript: values[ArgKey.webScript.rawValue],
+    webRoot: values[ArgKey.webRoot.rawValue],
+    webHost: values[ArgKey.webHost.rawValue] ?? "127.0.0.1",
+    webPort: Int(values[ArgKey.webPort.rawValue] ?? "18443") ?? 18443,
+    webCert: values[ArgKey.webCert.rawValue],
+    webKey: values[ArgKey.webKey.rawValue],
     pollInterval: TimeInterval(values[ArgKey.pollInterval.rawValue] ?? "3") ?? 3,
     shutdownGracePeriod: TimeInterval(values[ArgKey.shutdownGracePeriod.rawValue] ?? "5") ?? 5,
     powerpointBundleIdentifier: values[ArgKey.powerpointBundleIdentifier.rawValue] ?? "com.microsoft.Powerpoint",
@@ -45,105 +66,67 @@ func parseArguments() -> CompanionConfig {
   )
 }
 
-final class HelperSupervisor {
-  private let config: CompanionConfig
-  private var helperProcess: Process?
-  private var stopDeadline: Date?
+final class ManagedProcess {
+  let name: String
+  private let executableURL: URL
+  private let arguments: [String]
+  private let logPrefix: String
+  private let healthProbe: (() -> Bool)?
+  private var process: Process?
 
-  init(config: CompanionConfig) {
-    self.config = config
+  init(name: String, executableURL: URL, arguments: [String], logPrefix: String, healthProbe: (() -> Bool)? = nil) {
+    self.name = name
+    self.executableURL = executableURL
+    self.arguments = arguments
+    self.logPrefix = logPrefix
+    self.healthProbe = healthProbe
   }
 
-  func tick() {
-    let powerpointRunning = isPowerPointRunning()
-    if powerpointRunning {
-      stopDeadline = nil
-      ensureHelperRunning()
-      return
-    }
-
-    if helperProcess == nil {
-      return
-    }
-
-    if stopDeadline == nil {
-      stopDeadline = Date().addingTimeInterval(config.shutdownGracePeriod)
-      log("PowerPoint 已退出，等待 \(Int(config.shutdownGracePeriod)) 秒后停止 helper。")
-      return
-    }
-
-    if let deadline = stopDeadline, Date() >= deadline {
-      stopHelper()
-      stopDeadline = nil
-    }
-  }
-
-  func shutdown() {
-    stopHelper(force: true)
-  }
-
-  private func isPowerPointRunning() -> Bool {
-    NSWorkspace.shared.runningApplications.contains { app in
-      app.bundleIdentifier == config.powerpointBundleIdentifier && !app.isTerminated
-    }
-  }
-
-  private func helperProcessIsAlive() -> Bool {
-    guard let process = helperProcess else {
+  func isRunning() -> Bool {
+    guard let process else {
       return false
     }
     return process.isRunning
   }
 
-  private func ensureHelperRunning() {
-    if helperProcessIsAlive() {
+  func ensureRunning() {
+    if isRunning() {
       return
     }
 
-    if isHelperPortResponding() {
-      log("检测到现有 helper 已监听 127.0.0.1:\(config.helperPort)，跳过重复启动。")
-      helperProcess = nil
+    if let healthProbe, healthProbe() {
+      log("检测到现有 \(name) 已可访问，跳过重复启动。")
+      process = nil
       return
     }
 
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: config.helperCommand)
-
-    if let helperScript = config.helperScript, !helperScript.isEmpty {
-      if config.helperCommand == "/usr/bin/env" {
-        process.arguments = ["node", helperScript]
-      } else {
-        process.arguments = [helperScript]
-      }
-    } else {
-      process.arguments = []
-    }
-
-    let output = Pipe()
-    process.standardOutput = output
-    process.standardError = output
-    process.terminationHandler = { [weak self] terminatedProcess in
-      self?.log("helper 已退出，状态码 \(terminatedProcess.terminationStatus)。")
-      self?.helperProcess = nil
+    let nextProcess = Process()
+    nextProcess.executableURL = executableURL
+    nextProcess.arguments = arguments
+    nextProcess.standardOutput = FileHandle.standardOutput
+    nextProcess.standardError = FileHandle.standardError
+    nextProcess.terminationHandler = { [weak self] terminatedProcess in
+      self?.log("\(self?.name ?? "service") 已退出，状态码 \(terminatedProcess.terminationStatus)。")
+      self?.process = nil
     }
 
     do {
-      try process.run()
-      helperProcess = process
-      log("已启动 helper 进程。")
+      try nextProcess.run()
+      process = nextProcess
+      log("已启动 \(name) 进程。")
     } catch {
-      helperProcess = nil
-      log("启动 helper 失败：\(error.localizedDescription)")
+      process = nil
+      log("启动 \(name) 失败：\(error.localizedDescription)")
     }
   }
 
-  private func stopHelper(force: Bool = false) {
-    guard let process = helperProcess, process.isRunning else {
-      helperProcess = nil
+  func stop(force: Bool = false) {
+    guard let process, process.isRunning else {
+      self.process = nil
       return
     }
 
-    log("正在停止 helper 进程。")
+    log("正在停止 \(name) 进程。")
     process.terminate()
 
     if force {
@@ -156,35 +139,171 @@ final class HelperSupervisor {
       }
     }
 
-    helperProcess = nil
+    self.process = nil
   }
 
-  private func isHelperPortResponding() -> Bool {
-    guard let url = URL(string: "http://127.0.0.1:\(config.helperPort)/health") else {
+  private func log(_ message: String) {
+    print("\(logPrefix) \(message)")
+  }
+}
+
+final class CompanionSupervisor {
+  private let config: CompanionConfig
+  private let helperService: ManagedProcess
+  private let webService: ManagedProcess
+  private var helperStopDeadline: Date?
+
+  init(config: CompanionConfig) {
+    self.config = config
+
+    let helperExecutable = URL(fileURLWithPath: config.helperCommand)
+    self.helperService = ManagedProcess(
+      name: "helper",
+      executableURL: helperExecutable,
+      arguments: Self.buildProcessArguments(command: config.helperCommand, script: config.helperScript, extraArguments: []),
+      logPrefix: config.logPrefix,
+      healthProbe: { Self.probeHealth(url: URL(string: "http://127.0.0.1:\(config.helperPort)/health")) }
+    )
+
+    let webExecutable = URL(fileURLWithPath: config.webCommand)
+    self.webService = ManagedProcess(
+      name: "本地任务窗格服务",
+      executableURL: webExecutable,
+      arguments: Self.buildProcessArguments(
+        command: config.webCommand,
+        script: config.webScript,
+        extraArguments: [
+          "--root", config.webRoot ?? "",
+          "--host", config.webHost,
+          "--port", String(config.webPort),
+          "--cert", config.webCert ?? "",
+          "--key", config.webKey ?? "",
+          "--helper-host", "127.0.0.1",
+          "--helper-port", String(config.helperPort),
+        ]
+      ),
+      logPrefix: config.logPrefix,
+      healthProbe: {
+        Self.probeHealthWithCurl(urlString: "https://\(config.webHost):\(config.webPort)/health", allowInsecureTLS: true)
+      }
+    )
+  }
+
+  func tick() {
+    ensureWebServiceRunning()
+
+    let powerpointRunning = isPowerPointRunning()
+    if powerpointRunning {
+      helperStopDeadline = nil
+      helperService.ensureRunning()
+      return
+    }
+
+    if !helperService.isRunning() {
+      return
+    }
+
+    if helperStopDeadline == nil {
+      helperStopDeadline = Date().addingTimeInterval(config.shutdownGracePeriod)
+      log("PowerPoint 已退出，等待 \(Int(config.shutdownGracePeriod)) 秒后停止 helper。")
+      return
+    }
+
+    if let helperStopDeadline, Date() >= helperStopDeadline {
+      helperService.stop(force: true)
+      self.helperStopDeadline = nil
+    }
+  }
+
+  func shutdown() {
+    helperService.stop(force: true)
+    webService.stop(force: true)
+  }
+
+  private func ensureWebServiceRunning() {
+    guard let webRoot = config.webRoot, !webRoot.isEmpty,
+          let webScript = config.webScript, !webScript.isEmpty,
+          let webCert = config.webCert, !webCert.isEmpty,
+          let webKey = config.webKey, !webKey.isEmpty else {
+      log("本地任务窗格服务配置不完整，已跳过启动。")
+      return
+    }
+
+    guard FileManager.default.fileExists(atPath: webRoot),
+          FileManager.default.fileExists(atPath: webScript),
+          FileManager.default.fileExists(atPath: webCert),
+          FileManager.default.fileExists(atPath: webKey) else {
+      log("本地任务窗格服务所需文件缺失，已跳过启动。")
+      return
+    }
+
+    webService.ensureRunning()
+  }
+
+  private func isPowerPointRunning() -> Bool {
+    NSWorkspace.shared.runningApplications.contains { app in
+      app.bundleIdentifier == config.powerpointBundleIdentifier && !app.isTerminated
+    }
+  }
+
+  private func log(_ message: String) {
+    print("\(config.logPrefix) \(message)")
+  }
+
+  private static func buildProcessArguments(command: String, script: String?, extraArguments: [String]) -> [String] {
+    var arguments: [String] = []
+    if let script, !script.isEmpty {
+      if command == "/usr/bin/env" {
+        arguments.append("node")
+      }
+      arguments.append(script)
+    }
+    return arguments + extraArguments.filter { !$0.isEmpty }
+  }
+
+  private static func probeHealth(url: URL?, session: URLSession = .shared) -> Bool {
+    guard let url else {
       return false
     }
 
     let semaphore = DispatchSemaphore(value: 0)
     var success = false
-    let task = URLSession.shared.dataTask(with: url) { _, response, _ in
+    let task = session.dataTask(with: url) { _, response, _ in
       if let http = response as? HTTPURLResponse, (200..<500).contains(http.statusCode) {
         success = true
       }
       semaphore.signal()
     }
     task.resume()
-    _ = semaphore.wait(timeout: .now() + 0.8)
+    _ = semaphore.wait(timeout: .now() + 1.0)
     task.cancel()
     return success
   }
 
-  private func log(_ message: String) {
-    print("\(config.logPrefix) \(message)")
+  private static func probeHealthWithCurl(urlString: String, allowInsecureTLS: Bool) -> Bool {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+    var arguments = ["--silent", "--show-error", "--fail", "--max-time", "1"]
+    if allowInsecureTLS {
+      arguments.append("--insecure")
+    }
+    arguments.append(urlString)
+    process.arguments = arguments
+    process.standardOutput = Pipe()
+    process.standardError = Pipe()
+
+    do {
+      try process.run()
+      process.waitUntilExit()
+      return process.terminationStatus == 0
+    } catch {
+      return false
+    }
   }
 }
 
 let config = parseArguments()
-let supervisor = HelperSupervisor(config: config)
+let supervisor = CompanionSupervisor(config: config)
 
 signal(SIGTERM) { _ in
   supervisor.shutdown()
