@@ -42,16 +42,26 @@ cat > "$STAGE_DIR/README.txt" <<EOF
 SlideSCI for Mac v${VERSION}
 
 安装步骤：
-1. 确保 PowerPoint 已完全退出。
-2. 双击或在终端运行 install-slidesci-mac.sh。
-   推荐直接双击 install-slidesci-mac.command。
-3. 完全重启 PowerPoint。
-4. 在“视图”选项卡右侧找到 SlideSCI。
+1. 请优先双击 install-slidesci-mac.command。
+2. 如果你的 Mac 还没有安装 Node.js，请先安装 Node.js LTS：
+   https://nodejs.org/
+3. 确保 Microsoft PowerPoint 已完全退出。
+4. 双击运行 install-slidesci-mac.command。
+5. 如果 macOS 阻止运行，请右键该文件，选择“打开”，再确认一次。
+6. 按系统提示完成安装。
+7. 如果系统弹出权限提示，请允许终端或 Node 控制 Microsoft PowerPoint，并允许辅助功能权限。
+8. 安装完成后，重新打开 PowerPoint。
+9. 在“视图”选项卡右侧找到 SlideSCI。
 
 说明：
 - 本安装包会安装 companion watcher，使 helper 跟随 PowerPoint 启停。
 - 当前版本仍需要本机安装 Node.js，以运行 native-equation-helper.mjs。
 - 加载项前端地址：${ADDIN_BASE_URL}
+
+卸载：
+1. 完全退出 PowerPoint。
+2. 双击 uninstall-slidesci-mac.command。
+3. 卸载完成后重新打开 PowerPoint。
 EOF
 
 node "$ROOT_DIR/scripts/generate-release-notes.mjs" "v${VERSION}" "$ADDIN_BASE_URL" "$RELEASE_NOTES_PATH"

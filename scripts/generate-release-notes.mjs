@@ -18,11 +18,14 @@ const body = `## 安装
 请下载 **\`${artifactName}\`**，不要下载 GitHub 自动附带的 \`Source code\`。
 
 1. 下载并解压 \`${artifactName}\`
-2. 确保 Microsoft PowerPoint 已完全退出
-3. 双击运行 \`install-slidesci-mac.command\`
-4. 按系统提示允许脚本运行，并完成安装
-5. 重新打开 PowerPoint
-6. 在 **“视图”** 选项卡右侧找到 **SlideSCI**
+2. 如果你的 Mac 还没有安装 Node.js，请先安装 Node.js LTS：<https://nodejs.org/>
+3. 确保 Microsoft PowerPoint 已完全退出
+4. 双击运行 \`install-slidesci-mac.command\`
+5. 如果 macOS 阻止运行，请右键该文件，选择“打开”，再确认一次
+6. 按系统提示允许脚本运行，并完成安装
+7. 如果系统弹出权限提示，请允许终端或 Node 控制 Microsoft PowerPoint，并允许辅助功能权限
+8. 重新打开 PowerPoint
+9. 在 **“视图”** 选项卡右侧找到 **SlideSCI**
 
 ## 文件说明
 
@@ -37,7 +40,9 @@ const body = `## 安装
 
 ## 卸载
 
-解压安装包后，双击运行 \`uninstall-slidesci-mac.command\`，然后完全退出并重启 PowerPoint。
+1. 完全退出 PowerPoint
+2. 解压安装包后，双击运行 \`uninstall-slidesci-mac.command\`
+3. 卸载完成后重新打开 PowerPoint
 `;
 
 await writeFile(outputPath, body, "utf8");

@@ -22,33 +22,118 @@ helper 监听 `http://127.0.0.1:17926`，负责通过 PowerPoint 自动化创建
 
 ## 安装给最终用户
 
-推荐安装方式：
+普通用户推荐直接使用 GitHub Release 安装，不需要先了解仓库结构。
+
+### 方式 A：从 GitHub Release 安装（推荐）
+
+1. 打开仓库的 Releases 页面  
+   `https://github.com/try2love/SlideSCI_for_MAC/releases`
+
+2. 下载最新版本里的这一个文件：  
+   `SlideSCI-for-Mac-vX.Y.Z.zip`
+
+   不要下载：
+   - `Source code (zip)`
+   - `Source code (tar.gz)`
+   - `*.sha256`（这个只是校验文件，普通用户可以不下）
+
+3. 如果你的 Mac 还没有安装 Node.js，请先安装 Node.js LTS  
+   官方下载页：`https://nodejs.org/`
+
+   当前版本仍依赖本机 `node` 来运行本地公式 helper；如果没有 `node`，安装脚本会退出。
+
+4. 在安装前，先完全退出 Microsoft PowerPoint
+
+5. 双击下载好的 `SlideSCI-for-Mac-vX.Y.Z.zip`，解压得到一个文件夹
+
+6. 进入解压后的文件夹，双击：
+   `install-slidesci-mac.command`
+
+   如果 macOS 阻止运行：
+   - 右键该文件，选择“打开”
+   - 再次点击“打开”
+
+7. 安装脚本会自动完成这些事情：
+   - 安装 `SlideSCICompanion`
+   - 复制本地公式 helper
+   - 注册 `launchd` 用户级 LaunchAgent
+   - 复制 `manifest.xml` 到 PowerPoint 的侧载目录
+
+8. 首次使用时，如果系统弹出权限提示，请允许：
+   - 终端或 Node 控制 Microsoft PowerPoint
+   - 辅助功能权限
+
+9. 安装完成后，重新打开 PowerPoint
+
+10. 在 PowerPoint 顶部 **“视图”** 选项卡右侧找到 **SlideSCI**
+
+11. 打开任务窗格后即可使用
+
+安装完成后的行为：
+
+- PowerPoint 打开时，companion 会自动拉起 helper
+- PowerPoint 关闭后，helper 会在短暂宽限期后自动退出
+- 不需要再手动运行 `npm run helper`
+
+如需卸载：
+
+1. 完全退出 PowerPoint
+2. 回到解压后的文件夹
+3. 双击 `uninstall-slidesci-mac.command`
+4. 卸载完成后重新打开 PowerPoint
+
+### 方式 B：从仓库源码安装
+
+如果你不是普通用户，而是想从源码安装或自己修改代码，可以这样做：
+
+1. 把仓库拉到本地：
+
+```bash
+git clone https://github.com/try2love/SlideSCI_for_MAC.git
+cd SlideSCI_for_MAC
+```
+
+2. 安装依赖：
+
+```bash
+npm install
+```
+
+3. 生成开发用 manifest：
+
+```bash
+npm run manifest:dev
+```
+
+4. 启动前端开发服务：
+
+```bash
+npm run dev
+```
+
+5. 另开一个终端，启动公式 helper：
+
+```bash
+npm run helper
+```
+
+6. 按下文的 `wef` 目录说明，把 `manifest.xml` 复制到 PowerPoint 侧载目录
+
+7. 完全退出并重启 PowerPoint
+
+如果你想按“接近最终用户”的方式从源码安装，而不是分别手动跑服务，可以使用：
 
 ```bash
 npm run build
 npm run install:mac
 ```
 
-安装脚本会完成这些动作：
+这个脚本会：
 
-1. 编译本地 `SlideSCICompanion` watcher。
-2. 复制 helper 到 `~/Library/Application Support/SlideSCI/`。
-3. 注册 `launchd` 用户级 LaunchAgent，让 companion 常驻监听 PowerPoint 进程。
-4. 渲染并复制 `manifest.xml` 到 PowerPoint 的 `wef` 侧载目录。
-
-安装完成后，完全退出并重启 PowerPoint。此后：
-
-- PowerPoint 打开时，companion 会自动拉起本地 helper。
-- PowerPoint 关闭后，helper 会在短暂宽限期后自动退出。
-- `SlideSCI` 入口位于“视图”选项卡右侧。
-
-如需卸载：
-
-```bash
-npm run uninstall:mac
-```
-
-当前安装脚本仍要求本机存在 `node` 以运行 helper；仓库里已经加入了 companion/installer 基础设施，后续可继续把 helper 打包成独立可执行文件，去掉这个依赖。
+1. 编译本地 `SlideSCICompanion` watcher
+2. 复制 helper 到 `~/Library/Application Support/SlideSCI/`
+3. 注册 `launchd` 用户级 LaunchAgent，让 companion 常驻监听 PowerPoint 进程
+4. 复制 `manifest.xml` 到 PowerPoint 的 `wef` 侧载目录
 
 ## GitHub 发布
 
