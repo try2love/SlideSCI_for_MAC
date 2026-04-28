@@ -73,7 +73,7 @@ SlideSCI for Mac v${VERSION}
    - 生成并信任本地 HTTPS 证书
    - 注册 launchd LaunchAgent
    - 复制 manifest.xml 到 PowerPoint 侧载目录
-7. 如果系统弹出权限提示，请允许终端或 Node 控制 Microsoft PowerPoint，并允许辅助功能权限。
+7. 如果系统弹出权限提示，请允许 SlideSCICompanion 控制电脑，并允许辅助功能权限。
 8. 安装完成后，重新打开 PowerPoint。
 9. 在 PowerPoint 顶部找到独立的 SlideSCI 选项卡。
 
@@ -81,6 +81,7 @@ SlideSCI for Mac v${VERSION}
 - 本安装包运行时不依赖 GitHub Pages；任务窗格页面、helper 和 companion 都使用本机资源。
 - 当前版本仍需要本机安装 Node.js，以运行 native-equation-helper.mjs 和本地任务窗格服务。
 - 默认本地加载地址：${ADDIN_BASE_URL}
+- PowerPoint 打开时，companion 会自动拉起 helper；PowerPoint 完全退出后，helper 会自动停止。
 - 如需临时完全停用 SlideSCI，而不是卸载，请双击 stop-slidesci-mac.command。
 - 如需重新启用，请双击 start-slidesci-mac.command。
 

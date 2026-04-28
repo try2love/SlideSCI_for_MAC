@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { arrangeShapes } from "../lib/layout";
 import { LABEL_TEMPLATES } from "../lib/labels";
 import { generateLabels } from "../lib/labels";
@@ -64,12 +64,14 @@ function Field({
 function Section({
   title,
   children,
+  sectionRef,
 }: {
   title: string;
   children: React.ReactNode;
+  sectionRef?: React.RefObject<HTMLElement | null>;
 }) {
   return (
-    <section className="section">
+    <section className="section" ref={sectionRef}>
       <h2>{title}</h2>
       {children}
     </section>
@@ -93,8 +95,44 @@ export function App() {
   const [code, setCode] = useState("");
   const [markdown, setMarkdown] = useState("");
   const [latex, setLatex] = useState("");
+  const arrangeSectionRef = useRef<HTMLElement>(null);
+  const titleSectionRef = useRef<HTMLElement>(null);
+  const labelSectionRef = useRef<HTMLElement>(null);
+  const contentSectionRef = useRef<HTMLElement>(null);
+  const formatSectionRef = useRef<HTMLElement>(null);
+  const codeInputRef = useRef<HTMLTextAreaElement>(null);
+  const markdownInputRef = useRef<HTMLTextAreaElement>(null);
+  const latexInputRef = useRef<HTMLTextAreaElement>(null);
 
   const canRun = useMemo(() => !busy, [busy]);
+
+  useEffect(() => {
+    const tool = new URLSearchParams(window.location.search).get("tool");
+    if (!tool) {
+      return;
+    }
+
+    const targets: Record<string, { section?: React.RefObject<HTMLElement | null>; input?: React.RefObject<HTMLTextAreaElement | null> }> = {
+      arrange: { section: arrangeSectionRef },
+      labels: { section: labelSectionRef },
+      images: { section: titleSectionRef },
+      markdown: { section: contentSectionRef, input: markdownInputRef },
+      latex: { section: contentSectionRef, input: latexInputRef },
+      code: { section: contentSectionRef, input: codeInputRef },
+      format: { section: formatSectionRef },
+    };
+
+    const target = targets[tool];
+    if (!target) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      target.section?.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      target.input?.current?.focus();
+      target.input?.current?.select();
+    });
+  }, []);
 
   function setSettings(next: AppSettings): void {
     setSettingsState(next);
@@ -667,7 +705,7 @@ export function App() {
         <p>{status}</p>
       </header>
 
-      <Section title="图片自动排列">
+      <Section title="图片自动排列" sectionRef={arrangeSectionRef}>
         <div className="grid">
           <Field label="排序">
             <select value={settings.sortMode} onChange={(event) => updateSetting("sortMode", event.target.value as SortMode)}>
@@ -701,7 +739,7 @@ export function App() {
         <button disabled={!canRun} onClick={() => void run("图片排列", arrangeSelectedShapes)}>图片排列</button>
       </Section>
 
-      <Section title="图片标题">
+      <Section title="图片标题" sectionRef={titleSectionRef}>
         <div className="grid">
           <Field label="字体">
             <input value={settings.titleFontName} onChange={(event) => updateSetting("titleFontName", event.target.value)} />
@@ -728,7 +766,7 @@ export function App() {
         </div>
       </Section>
 
-      <Section title="图片标签">
+      <Section title="图片标签" sectionRef={labelSectionRef}>
         <div className="grid">
           <Field label="字体">
             <input value={settings.labelFontName} onChange={(event) => updateSetting("labelFontName", event.target.value)} />
@@ -759,7 +797,7 @@ export function App() {
         </div>
       </Section>
 
-      <Section title="内容插入">
+      <Section title="内容插入" sectionRef={contentSectionRef}>
         <div className="grid">
           <Field label="代码语言">
             <select value={settings.codeLanguage} onChange={(event) => updateSetting("codeLanguage", event.target.value)}>
@@ -770,11 +808,11 @@ export function App() {
           <label className="check"><input type="checkbox" checked={settings.allowBlockEquationImageFallback} onChange={(event) => updateSetting("allowBlockEquationImageFallback", event.target.checked)} />允许块级公式降级为图片</label>
           <label className="check"><input type="checkbox" checked={settings.allowInlineEquationImageFallback} onChange={(event) => updateSetting("allowInlineEquationImageFallback", event.target.checked)} />允许行内公式降级为图片</label>
         </div>
-        <textarea value={code} placeholder="粘贴代码" onChange={(event) => setCode(event.target.value)} />
+        <textarea ref={codeInputRef} value={code} placeholder="粘贴代码" onChange={(event) => setCode(event.target.value)} />
         <button disabled={!canRun} onClick={() => void run("插入代码块", insertCodeBlock)}>插入代码块</button>
-        <textarea value={markdown} placeholder="粘贴 Markdown" onChange={(event) => setMarkdown(event.target.value)} />
+        <textarea ref={markdownInputRef} value={markdown} placeholder="粘贴 Markdown" onChange={(event) => setMarkdown(event.target.value)} />
         <button disabled={!canRun} onClick={() => void run("插入 Markdown", insertMarkdown)}>插入 Markdown</button>
-        <textarea value={latex} placeholder="输入 LaTeX，例如 \\frac{a}{b}" onChange={(event) => setLatex(event.target.value)} />
+        <textarea ref={latexInputRef} value={latex} placeholder="输入 LaTeX，例如 \\frac{a}{b}" onChange={(event) => setLatex(event.target.value)} />
         <div className="actions">
           <button disabled={!canRun} onClick={() => void run("插入 LaTeX 原生公式", insertLatexNative)}>插入 LaTeX 原生公式</button>
           <button disabled={!canRun} onClick={() => void run("插入 LaTeX 图片", insertLatexImage)}>插入 LaTeX 图片</button>
@@ -782,7 +820,7 @@ export function App() {
         </div>
       </Section>
 
-      <Section title="格式工具">
+      <Section title="格式工具" sectionRef={formatSectionRef}>
         <div className="toolRows">
           <div className="toolRow">
             <button className="copyButton" disabled={!canRun} onClick={() => void run("复制位置", copyPosition)}>复制位置</button>

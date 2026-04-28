@@ -30,7 +30,7 @@ xattr -dr com.apple.quarantine "/你的解压目录/${artifactName.replace(".zip
 6. 如果仍被阻止，再右键该文件，选择“打开”，再确认一次
 7. 按系统提示允许脚本运行，并完成安装
 8. 安装脚本会同时安装本地任务窗格 HTTPS 服务，并在首次安装时把本地证书加入登录钥匙串
-9. 如果系统弹出权限提示，请允许终端或 Node 控制 Microsoft PowerPoint，并允许辅助功能权限
+9. 如果系统弹出权限提示，请允许 \`SlideSCICompanion\` 控制电脑，并允许辅助功能权限
 10. 重新打开 PowerPoint
 11. 在 PowerPoint 顶部找到独立的 **SlideSCI** 选项卡
 
@@ -44,6 +44,7 @@ xattr -dr com.apple.quarantine "/你的解压目录/${artifactName.replace(".zip
 
 - 当前版本仍要求本机已安装 Node.js，因为本地公式 helper 和本地任务窗格服务都通过 Node 运行
 - 运行时不依赖 GitHub Pages；加载项页面默认由本机地址提供：${addinBaseUrl}
+- PowerPoint 打开时，companion 会自动拉起 helper；PowerPoint 完全退出后，helper 会自动停止
 
 ## 卸载
 

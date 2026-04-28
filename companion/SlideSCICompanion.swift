@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 struct CompanionConfig {
@@ -15,6 +16,7 @@ struct CompanionConfig {
   var shutdownGracePeriod: TimeInterval
   var powerpointBundleIdentifier: String
   var logPrefix: String
+  var appleScriptFile: String?
 }
 
 enum ArgKey: String {
@@ -32,6 +34,7 @@ enum ArgKey: String {
   case shutdownGracePeriod = "--shutdown-grace-period"
   case powerpointBundleIdentifier = "--powerpoint-bundle-id"
   case logPrefix = "--log-prefix"
+  case runAppleScriptFile = "--run-applescript-file"
 }
 
 func parseArguments() -> CompanionConfig {
@@ -61,7 +64,8 @@ func parseArguments() -> CompanionConfig {
     pollInterval: TimeInterval(values[ArgKey.pollInterval.rawValue] ?? "3") ?? 3,
     shutdownGracePeriod: TimeInterval(values[ArgKey.shutdownGracePeriod.rawValue] ?? "5") ?? 5,
     powerpointBundleIdentifier: values[ArgKey.powerpointBundleIdentifier.rawValue] ?? "com.microsoft.Powerpoint",
-    logPrefix: values[ArgKey.logPrefix.rawValue] ?? "[SlideSCI companion]"
+    logPrefix: values[ArgKey.logPrefix.rawValue] ?? "[SlideSCI companion]",
+    appleScriptFile: values[ArgKey.runAppleScriptFile.rawValue]
   )
 }
 
@@ -70,14 +74,23 @@ final class ManagedProcess {
   private let executableURL: URL
   private let arguments: [String]
   private let logPrefix: String
+  private let environment: [String: String]
   private let healthProbe: (() -> Bool)?
   private var process: Process?
 
-  init(name: String, executableURL: URL, arguments: [String], logPrefix: String, healthProbe: (() -> Bool)? = nil) {
+  init(
+    name: String,
+    executableURL: URL,
+    arguments: [String],
+    logPrefix: String,
+    environment: [String: String] = [:],
+    healthProbe: (() -> Bool)? = nil
+  ) {
     self.name = name
     self.executableURL = executableURL
     self.arguments = arguments
     self.logPrefix = logPrefix
+    self.environment = environment
     self.healthProbe = healthProbe
   }
 
@@ -102,6 +115,9 @@ final class ManagedProcess {
     let nextProcess = Process()
     nextProcess.executableURL = executableURL
     nextProcess.arguments = arguments
+    if !environment.isEmpty {
+      nextProcess.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+    }
     nextProcess.standardOutput = FileHandle.standardOutput
     nextProcess.standardError = FileHandle.standardError
     nextProcess.terminationHandler = { [weak self] terminatedProcess in
@@ -150,6 +166,7 @@ final class CompanionSupervisor {
   private let config: CompanionConfig
   private let helperService: ManagedProcess
   private let webService: ManagedProcess
+  private var helperStopDeadline: Date?
 
   init(config: CompanionConfig) {
     self.config = config
@@ -160,6 +177,7 @@ final class CompanionSupervisor {
       executableURL: helperExecutable,
       arguments: Self.buildProcessArguments(command: config.helperCommand, script: config.helperScript, extraArguments: []),
       logPrefix: config.logPrefix,
+      environment: ["SLIDESCI_APPLESCRIPT_RUNNER": CommandLine.arguments[0]],
       healthProbe: { Self.probeHealth(url: URL(string: "http://127.0.0.1:\(config.helperPort)/health")) }
     )
 
@@ -189,7 +207,26 @@ final class CompanionSupervisor {
 
   func tick() {
     ensureWebServiceRunning()
-    ensureHelperRunning()
+    if isPowerPointRunning() {
+      helperStopDeadline = nil
+      ensureHelperRunning()
+      return
+    }
+
+    if !helperService.isRunning() {
+      return
+    }
+
+    if helperStopDeadline == nil {
+      helperStopDeadline = Date().addingTimeInterval(config.shutdownGracePeriod)
+      log("PowerPoint 已退出，等待 \(Int(config.shutdownGracePeriod)) 秒后停止 helper。")
+      return
+    }
+
+    if let helperStopDeadline, Date() >= helperStopDeadline {
+      helperService.stop(force: true)
+      self.helperStopDeadline = nil
+    }
   }
 
   func shutdown() {
@@ -229,6 +266,11 @@ final class CompanionSupervisor {
     }
 
     helperService.ensureRunning()
+  }
+
+  private func isPowerPointRunning() -> Bool {
+    let apps = NSRunningApplication.runningApplications(withBundleIdentifier: config.powerpointBundleIdentifier)
+    return apps.contains(where: { !$0.isTerminated })
   }
 
   private func log(_ message: String) {
@@ -287,7 +329,39 @@ final class CompanionSupervisor {
   }
 }
 
+func runAppleScriptFile(path: String) -> Int32 {
+  do {
+    let source = try String(contentsOfFile: path, encoding: .utf8)
+    guard let script = NSAppleScript(source: source) else {
+      FileHandle.standardError.write(Data("无法创建 NSAppleScript 实例。\n".utf8))
+      return 1
+    }
+
+    var errorInfo: NSDictionary?
+    let result = script.executeAndReturnError(&errorInfo)
+    if let errorInfo {
+      let message = errorInfo[NSAppleScript.errorMessage] as? String ?? errorInfo.description
+      let number = errorInfo[NSAppleScript.errorNumber] as? Int ?? 1
+      FileHandle.standardError.write(Data("\(message) (\(number))\n".utf8))
+      return 1
+    }
+
+    if let stringValue = result.stringValue, !stringValue.isEmpty {
+      print(stringValue)
+    } else if result.descriptorType != typeNull {
+      print(result.description)
+    }
+    return 0
+  } catch {
+    FileHandle.standardError.write(Data("\(error.localizedDescription)\n".utf8))
+    return 1
+  }
+}
+
 let config = parseArguments()
+if let appleScriptFile = config.appleScriptFile, !appleScriptFile.isEmpty {
+  exit(runAppleScriptFile(path: appleScriptFile))
+}
 let supervisor = CompanionSupervisor(config: config)
 
 signal(SIGTERM) { _ in

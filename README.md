@@ -18,7 +18,7 @@ npm run dev
 npm run helper
 ```
 
-helper 监听 `http://127.0.0.1:17926`，负责通过 PowerPoint 自动化创建原生公式文本框。首次使用时 macOS 可能要求允许终端或 Node 自动化控制 Microsoft PowerPoint；如果拒绝，含公式模块会失败并在状态栏显示原因，不会静默降级成图片。
+helper 监听 `http://127.0.0.1:17926`，负责通过 PowerPoint 自动化创建原生公式文本框。安装版默认通过 `SlideSCICompanion` 执行界面自动化；首次使用时 macOS 可能要求在“系统设置 > 隐私与安全性 > 辅助功能”中允许 `SlideSCICompanion` 控制电脑，否则含公式模块会失败并在状态栏显示原因，不会静默降级成图片。
 
 如果你想模拟最终用户的“全本地安装包”运行方式，而不是开发服务器模式，可以先构建前端，再启动本地任务窗格 HTTPS 服务：
 
@@ -40,30 +40,23 @@ node scripts/local-addin-server.mjs \
 
 ### 方式 A：从 GitHub Release 安装（推荐）
 
-1. 打开仓库的 Releases 页面  
-   `https://github.com/try2love/SlideSCI_for_MAC/releases`
-
-2. 下载最新版本里的这一个文件：  
-   `SlideSCI-for-Mac-vX.Y.Z.zip`
+1. 打开仓库的 Releases 页面 `https://github.com/try2love/SlideSCI_for_MAC/releases`
+2. 下载最新版本里的这一个文件：`SlideSCI-for-Mac-vX.Y.Z.zip`
 
    不要下载：
+
    - `Source code (zip)`
    - `Source code (tar.gz)`
    - `*.sha256`（这个只是校验文件，普通用户可以不下）
-
-3. 如果你的 Mac 还没有安装 Node.js，请先安装 Node.js LTS  
-   官方下载页：`https://nodejs.org/`
+3. 如果你的 Mac 还没有安装 Node.js，请先安装 Node.js LTS官方下载页：`https://nodejs.org/`
 
    当前版本仍依赖本机 `node` 来运行本地公式 helper 和本地 taskpane 服务；如果没有 `node`，安装脚本会退出。
-
 4. 在安装前，先完全退出 Microsoft PowerPoint
-
 5. 双击下载好的 `SlideSCI-for-Mac-vX.Y.Z.zip`，解压得到一个文件夹
-
 6. 进入解压后的文件夹，双击：
    `install-slidesci-mac.command`
 
-   如果 macOS 反复阻止运行 `.command` 文件，先在终端执行：
+   建议解压后直接运行下面的命令来防止 macOS 反复阻止运行 `.command` 文件。在终端执行：
 
 ```bash
 xattr -dr com.apple.quarantine "/你的解压目录/SlideSCI-for-Mac-vX.Y.Z"
@@ -72,31 +65,31 @@ xattr -dr com.apple.quarantine "/你的解压目录/SlideSCI-for-Mac-vX.Y.Z"
    然后再双击 `install-slidesci-mac.command`。
 
    如果仍被阻止：
-   - 右键该文件，选择“打开”
-   - 再次点击“打开”
+
+- 右键该文件，选择“打开”
+- 再次点击“打开”
 
 7. 安装脚本会自动完成这些事情：
+
    - 安装 `SlideSCICompanion`
    - 复制本地公式 helper
    - 复制本地 taskpane 页面和本地 HTTPS 服务
    - 生成并信任本地 HTTPS 证书
    - 注册 `launchd` 用户级 LaunchAgent
    - 复制 `manifest.xml` 到 PowerPoint 的侧载目录
-
 8. 首次使用时，如果系统弹出权限提示，请允许：
-   - 终端或 Node 控制 Microsoft PowerPoint
+
+   - `SlideSCICompanion` 控制电脑
    - 辅助功能权限
-
 9. 安装完成后，重新打开 PowerPoint
-
 10. 在 PowerPoint 顶部找到独立的 **SlideSCI** 选项卡
-
 11. 打开任务窗格后即可使用
 
 安装完成后的行为：
 
 - 本地 taskpane HTTPS 服务由 companion 保持可用，确保 PowerPoint 能稳定加载插件页面
-- companion 会常驻托管本地 helper，避免因 PowerPoint 进程识别不稳定导致公式功能失效
+- PowerPoint 打开时，companion 会自动拉起本地 helper
+- PowerPoint 完全退出后，helper 会在短暂宽限期后自动停止
 - 不需要再手动运行 `npm run helper` 或 `npm run dev`
 
 如果你想不卸载而完全停掉 SlideSCI：
@@ -159,15 +152,13 @@ npm run install:mac
 ```
 
 7. 这个脚本会：
-
-1. 编译本地 `SlideSCICompanion` watcher
-2. 复制 helper 到 `~/Library/Application Support/SlideSCI/`
-3. 复制本地 taskpane 页面和本地 HTTPS 服务
-4. 生成并信任本地 HTTPS 证书
-5. 注册 `launchd` 用户级 LaunchAgent，让 companion 常驻监听 PowerPoint 进程
-6. 复制 `manifest.xml` 到 PowerPoint 的 `wef` 侧载目录
-
-8. 完全退出并重启 PowerPoint
+8. 编译本地 `SlideSCICompanion` watcher
+9. 复制 helper 到 `~/Library/Application Support/SlideSCI/`
+10. 复制本地 taskpane 页面和本地 HTTPS 服务
+11. 生成并信任本地 HTTPS 证书
+12. 注册 `launchd` 用户级 LaunchAgent，让 companion 常驻监听 PowerPoint 进程
+13. 复制 `manifest.xml` 到 PowerPoint 的 `wef` 侧载目录
+14. 完全退出并重启 PowerPoint
 
 ## GitHub 发布
 
@@ -218,7 +209,7 @@ Mac PowerPoint 本地侧载传统 XML manifest：
 ~/Library/Containers/com.microsoft.Powerpoint/Data/Documents/wef
 ```
 
-把 `manifest.xml` 放入该目录后完全退出并重启 PowerPoint。加载成功后，会在顶部出现独立的 `SlideSCI` 选项卡和“打开 SlideSCI”按钮；也可以从“加载项”入口查找 `SlideSCI for Mac`。
+把 `manifest.xml` 放入该目录后完全退出并重启 PowerPoint。加载成功后，会在顶部出现独立的 `SlideSCI` 选项卡，里面按“内容插入 / 图片工具 / 格式工具”分组展示按钮；也可以从“加载项”入口查找 `SlideSCI for Mac`。
 
 如果加载项不出现：
 

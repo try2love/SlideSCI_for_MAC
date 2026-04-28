@@ -33,22 +33,22 @@
             <Description resid="GetStarted.Description" />
             <LearnMoreUrl resid="GetStarted.LearnMoreUrl" />
           </GetStarted>
-          <FunctionFile resid="Taskpane.Url" />
+          <FunctionFile resid="Taskpane.HomeUrl" />
           <ExtensionPoint xsi:type="PrimaryCommandSurface">
             <CustomTab id="SlideSCI.Tab">
               <Label resid="Tab.Label" />
-              <Group id="SlideSCI.Group">
-                <Label resid="Group.Label" />
+              <Group id="SlideSCI.InsertGroup">
+                <Label resid="InsertGroup.Label" />
                 <Icon>
                   <bt:Image size="16" resid="Icon.16x16" />
                   <bt:Image size="32" resid="Icon.32x32" />
                   <bt:Image size="80" resid="Icon.80x80" />
                 </Icon>
-                <Control xsi:type="Button" id="SlideSCI.OpenTaskpane">
-                  <Label resid="OpenTaskpane.Label" />
+                <Control xsi:type="Button" id="SlideSCI.OpenMarkdown">
+                  <Label resid="OpenMarkdown.Label" />
                   <Supertip>
-                    <Title resid="OpenTaskpane.Label" />
-                    <Description resid="OpenTaskpane.Tooltip" />
+                    <Title resid="OpenMarkdown.Label" />
+                    <Description resid="OpenMarkdown.Tooltip" />
                   </Supertip>
                   <Icon>
                     <bt:Image size="16" resid="Icon.16x16" />
@@ -56,8 +56,104 @@
                     <bt:Image size="80" resid="Icon.80x80" />
                   </Icon>
                   <Action xsi:type="ShowTaskpane">
-                    <TaskpaneId>ButtonId1</TaskpaneId>
-                    <SourceLocation resid="Taskpane.Url" />
+                    <TaskpaneId>SlideSCI.Markdown</TaskpaneId>
+                    <SourceLocation resid="Taskpane.MarkdownUrl" />
+                  </Action>
+                </Control>
+                <Control xsi:type="Button" id="SlideSCI.OpenLatex">
+                  <Label resid="OpenLatex.Label" />
+                  <Supertip>
+                    <Title resid="OpenLatex.Label" />
+                    <Description resid="OpenLatex.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16" />
+                    <bt:Image size="32" resid="Icon.32x32" />
+                    <bt:Image size="80" resid="Icon.80x80" />
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>SlideSCI.Latex</TaskpaneId>
+                    <SourceLocation resid="Taskpane.LatexUrl" />
+                  </Action>
+                </Control>
+                <Control xsi:type="Button" id="SlideSCI.OpenCode">
+                  <Label resid="OpenCode.Label" />
+                  <Supertip>
+                    <Title resid="OpenCode.Label" />
+                    <Description resid="OpenCode.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16" />
+                    <bt:Image size="32" resid="Icon.32x32" />
+                    <bt:Image size="80" resid="Icon.80x80" />
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>SlideSCI.Code</TaskpaneId>
+                    <SourceLocation resid="Taskpane.CodeUrl" />
+                  </Action>
+                </Control>
+              </Group>
+              <Group id="SlideSCI.ImageGroup">
+                <Label resid="ImageGroup.Label" />
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16" />
+                  <bt:Image size="32" resid="Icon.32x32" />
+                  <bt:Image size="80" resid="Icon.80x80" />
+                </Icon>
+                <Control xsi:type="Button" id="SlideSCI.OpenArrange">
+                  <Label resid="OpenArrange.Label" />
+                  <Supertip>
+                    <Title resid="OpenArrange.Label" />
+                    <Description resid="OpenArrange.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16" />
+                    <bt:Image size="32" resid="Icon.32x32" />
+                    <bt:Image size="80" resid="Icon.80x80" />
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>SlideSCI.Arrange</TaskpaneId>
+                    <SourceLocation resid="Taskpane.ArrangeUrl" />
+                  </Action>
+                </Control>
+                <Control xsi:type="Button" id="SlideSCI.OpenLabels">
+                  <Label resid="OpenLabels.Label" />
+                  <Supertip>
+                    <Title resid="OpenLabels.Label" />
+                    <Description resid="OpenLabels.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16" />
+                    <bt:Image size="32" resid="Icon.32x32" />
+                    <bt:Image size="80" resid="Icon.80x80" />
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>SlideSCI.Labels</TaskpaneId>
+                    <SourceLocation resid="Taskpane.ImagesUrl" />
+                  </Action>
+                </Control>
+              </Group>
+              <Group id="SlideSCI.FormatGroup">
+                <Label resid="FormatGroup.Label" />
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16" />
+                  <bt:Image size="32" resid="Icon.32x32" />
+                  <bt:Image size="80" resid="Icon.80x80" />
+                </Icon>
+                <Control xsi:type="Button" id="SlideSCI.OpenFormat">
+                  <Label resid="OpenFormat.Label" />
+                  <Supertip>
+                    <Title resid="OpenFormat.Label" />
+                    <Description resid="OpenFormat.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16" />
+                    <bt:Image size="32" resid="Icon.32x32" />
+                    <bt:Image size="80" resid="Icon.80x80" />
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>SlideSCI.Format</TaskpaneId>
+                    <SourceLocation resid="Taskpane.FormatUrl" />
                   </Action>
                 </Control>
               </Group>
@@ -73,17 +169,35 @@
         <bt:Image id="Icon.80x80" DefaultValue="https://localhost:3000/assets/icon-80.png" />
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/index.html" />
+        <bt:Url id="Taskpane.HomeUrl" DefaultValue="https://localhost:3000/index.html" />
+        <bt:Url id="Taskpane.MarkdownUrl" DefaultValue="https://localhost:3000/index.html?tool=markdown" />
+        <bt:Url id="Taskpane.LatexUrl" DefaultValue="https://localhost:3000/index.html?tool=latex" />
+        <bt:Url id="Taskpane.CodeUrl" DefaultValue="https://localhost:3000/index.html?tool=code" />
+        <bt:Url id="Taskpane.ArrangeUrl" DefaultValue="https://localhost:3000/index.html?tool=arrange" />
+        <bt:Url id="Taskpane.ImagesUrl" DefaultValue="https://localhost:3000/index.html?tool=labels" />
+        <bt:Url id="Taskpane.FormatUrl" DefaultValue="https://localhost:3000/index.html?tool=format" />
         <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://github.com/Achuan-2/SlideSCI" />
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="Tab.Label" DefaultValue="SlideSCI" />
-        <bt:String id="Group.Label" DefaultValue="SlideSCI" />
-        <bt:String id="OpenTaskpane.Label" DefaultValue="打开 SlideSCI" />
+        <bt:String id="InsertGroup.Label" DefaultValue="内容插入" />
+        <bt:String id="ImageGroup.Label" DefaultValue="图片工具" />
+        <bt:String id="FormatGroup.Label" DefaultValue="格式工具" />
+        <bt:String id="OpenMarkdown.Label" DefaultValue="Markdown" />
+        <bt:String id="OpenLatex.Label" DefaultValue="LaTeX 公式" />
+        <bt:String id="OpenCode.Label" DefaultValue="代码块" />
+        <bt:String id="OpenArrange.Label" DefaultValue="图片排列" />
+        <bt:String id="OpenLabels.Label" DefaultValue="标题与标签" />
+        <bt:String id="OpenFormat.Label" DefaultValue="位置与格式" />
         <bt:String id="GetStarted.Title" DefaultValue="SlideSCI for Mac 已加载" />
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="OpenTaskpane.Tooltip" DefaultValue="打开 SlideSCI for Mac 任务窗格。" />
+        <bt:String id="OpenMarkdown.Tooltip" DefaultValue="打开 SlideSCI 的 Markdown 插入功能区。" />
+        <bt:String id="OpenLatex.Tooltip" DefaultValue="打开 SlideSCI 的 LaTeX 原生公式功能区。" />
+        <bt:String id="OpenCode.Tooltip" DefaultValue="打开 SlideSCI 的代码块插入功能区。" />
+        <bt:String id="OpenArrange.Tooltip" DefaultValue="打开 SlideSCI 的图片排列功能区。" />
+        <bt:String id="OpenLabels.Tooltip" DefaultValue="打开 SlideSCI 的图片标题与标签功能区。" />
+        <bt:String id="OpenFormat.Tooltip" DefaultValue="打开 SlideSCI 的位置与格式工具功能区。" />
         <bt:String id="GetStarted.Description" DefaultValue="从顶部 SlideSCI 选项卡打开任务窗格。" />
       </bt:LongStrings>
     </Resources>

@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.SLIDESCI_NATIVE_HELPER_PORT || 17926);
 export const SCRIPT_EXECUTION_MODE = "temp-file";
+const APPLESCRIPT_RUNNER = process.env.SLIDESCI_APPLESCRIPT_RUNNER || "";
 
 const POWERPOINT_PROCESS_NAME = "Microsoft PowerPoint";
 const MENU_LABELS = {
@@ -130,7 +131,9 @@ async function runOsaScript(kind, script) {
     if (syntaxCheck.ok === false) {
       throw new Error(`AppleScript 编译失败：${syntaxCheck.message}`);
     }
-    const { stdout } = await execFileAsync("osascript", [scriptPath], { timeout: 8000 });
+    const command = APPLESCRIPT_RUNNER || "osascript";
+    const args = APPLESCRIPT_RUNNER ? ["--run-applescript-file", scriptPath] : [scriptPath];
+    const { stdout } = await execFileAsync(command, args, { timeout: 8000 });
     return stdout;
   });
 }
@@ -374,9 +377,13 @@ return "equation-insert"
 function guiAutomationMessage(error) {
   const message = error instanceof Error ? error.message : String(error);
   if (/not authorized|not permitted|-1743|辅助功能|accessibility/i.test(message)) {
-    return "已检测到 PowerPoint，但 helper 缺少 macOS 辅助功能权限。请在“系统设置 > 隐私与安全性 > 辅助功能”中允许终端或 Node 控制电脑。";
+    return APPLESCRIPT_RUNNER
+      ? "已检测到 PowerPoint，但 helper 缺少 macOS 辅助功能权限。请在“系统设置 > 隐私与安全性 > 辅助功能”中允许 SlideSCICompanion 控制电脑，然后重新打开 PowerPoint。"
+      : "已检测到 PowerPoint，但 helper 缺少 macOS 辅助功能权限。请在“系统设置 > 隐私与安全性 > 辅助功能”中允许终端或 Node 控制电脑。";
   }
-  return `已检测到 PowerPoint，但界面自动化不可用：${message}。请确认已允许终端或 Node 控制 Microsoft PowerPoint，并保持 PowerPoint 窗口处于前台。`;
+  return APPLESCRIPT_RUNNER
+    ? `已检测到 PowerPoint，但界面自动化不可用：${message}。请确认已允许 SlideSCICompanion 控制电脑，并保持 PowerPoint 窗口处于前台。`
+    : `已检测到 PowerPoint，但界面自动化不可用：${message}。请确认已允许终端或 Node 控制 Microsoft PowerPoint，并保持 PowerPoint 窗口处于前台。`;
 }
 
 async function isPowerPointRunning() {
@@ -401,7 +408,9 @@ async function probeGuiAutomation() {
       return {
         available: false,
         accessibilityGranted: false,
-        message: "已检测到 PowerPoint，但 helper 缺少 macOS 辅助功能权限。请在“系统设置 > 隐私与安全性 > 辅助功能”中允许终端或 Node 控制电脑。",
+        message: APPLESCRIPT_RUNNER
+          ? "已检测到 PowerPoint，但 helper 缺少 macOS 辅助功能权限。请在“系统设置 > 隐私与安全性 > 辅助功能”中允许 SlideSCICompanion 控制电脑，然后重新打开 PowerPoint。"
+          : "已检测到 PowerPoint，但 helper 缺少 macOS 辅助功能权限。请在“系统设置 > 隐私与安全性 > 辅助功能”中允许终端或 Node 控制电脑。",
       };
     }
     if (result === "powerpoint-not-running") {
