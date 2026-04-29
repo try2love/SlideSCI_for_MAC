@@ -12,6 +12,8 @@ import {
 
 const HELPER_BASE_URLS = ["/native-helper", "http://127.0.0.1:17926", "http://localhost:17926"];
 let preferredHelperBaseUrl = HELPER_BASE_URLS[0];
+const HELPER_HEALTH_CACHE_MS = 5000;
+let helperHealthCache: { value: NativeEquationHelperHealth; expiresAt: number } | undefined;
 
 export type NativeEquationHelperStrategy = "equation-insert";
 export const DEFAULT_EQUATION_STRATEGY_ORDER: NativeEquationHelperStrategy[] = ["equation-insert"];
@@ -128,10 +130,24 @@ async function fetchHelper(path: string, init?: RequestInit): Promise<Response> 
   throw lastError;
 }
 
+export function resetNativeEquationHelperCache(): void {
+  helperHealthCache = undefined;
+}
+
 export async function checkNativeEquationHelper(): Promise<NativeEquationHelperHealth> {
+  if (helperHealthCache && Date.now() < helperHealthCache.expiresAt) {
+    return helperHealthCache.value;
+  }
   try {
     const response = await fetchHelper("/health");
-    return readJsonResponse<NativeEquationHelperHealth>(response);
+    const health = await readJsonResponse<NativeEquationHelperHealth>(response);
+    if (health.ok && health.nativeEquationAvailable) {
+      helperHealthCache = {
+        value: health,
+        expiresAt: Date.now() + HELPER_HEALTH_CACHE_MS,
+      };
+    }
+    return health;
   } catch (error) {
     return {
       ok: false,

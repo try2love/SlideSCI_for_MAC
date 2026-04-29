@@ -13,6 +13,7 @@ describe("native equation helper client", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    nativeEquation.resetNativeEquationHelperCache();
   });
 
   it("calls convert-selection through the helper", async () => {
@@ -159,7 +160,6 @@ describe("native equation helper client", () => {
       .fn()
       .mockResolvedValueOnce(jsonResponse({ ok: true, helperBuildId: "abc123def456", scriptExecutionMode: "temp-file", equationScriptSyntaxOk: true, powerpointRunning: true, nativeEquationAvailable: true, message: "ok" }))
       .mockResolvedValueOnce(jsonResponse({ ok: true, mode: "native", nativeCount: 1, strategyUsed: "equation-insert", message: "done-a" }))
-      .mockResolvedValueOnce(jsonResponse({ ok: true, helperBuildId: "abc123def456", scriptExecutionMode: "temp-file", equationScriptSyntaxOk: true, powerpointRunning: true, nativeEquationAvailable: true, message: "ok" }))
       .mockResolvedValueOnce(jsonResponse({ ok: true, mode: "native", nativeCount: 1, strategyUsed: "equation-insert", message: "done-b" }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -179,7 +179,7 @@ describe("native equation helper client", () => {
     expect(selectTextRange).toHaveBeenNthCalledWith(1, "shape-1", 12, 7);
     expect(selectTextRange).toHaveBeenNthCalledWith(2, "shape-3", 3, 6);
     expect(fetchMock.mock.calls[1][0]).toBe("/native-helper/equation/convert-selection");
-    expect(fetchMock.mock.calls[3][0]).toBe("/native-helper/equation/convert-selection");
+    expect(fetchMock.mock.calls[2][0]).toBe("/native-helper/equation/convert-selection");
     expect(result.id).toBe("shape-3");
     expect(result.nativeCount).toBe(2);
     expect(result.mode).toBe("native");
@@ -239,7 +239,6 @@ describe("native equation helper client", () => {
       .fn()
       .mockResolvedValueOnce(jsonResponse({ ok: true, helperBuildId: "abc123def456", scriptExecutionMode: "temp-file", equationScriptSyntaxOk: true, powerpointRunning: true, nativeEquationAvailable: true, message: "ok" }))
       .mockResolvedValueOnce(jsonResponse({ ok: false, helperBuildId: "abc123def456", mode: "unsupported", message: "已检测到 PowerPoint，但界面自动化不可用：无法进入文本编辑状态。请先选中文本框，再重试。最后焦点：role=AXGroup, subrole=, label=Slide canvas, AXSelectedTextRange=no:缺少文本选择 (0) (-2700)" }, { status: 500 }))
-      .mockResolvedValueOnce(jsonResponse({ ok: true, helperBuildId: "abc123def456", scriptExecutionMode: "temp-file", equationScriptSyntaxOk: true, powerpointRunning: true, nativeEquationAvailable: true, message: "ok" }))
       .mockResolvedValueOnce(jsonResponse({ ok: true, mode: "native", nativeCount: 1, strategyUsed: "equation-insert", message: "done" }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -252,7 +251,7 @@ describe("native equation helper client", () => {
     expect(deleteShapes).toHaveBeenCalledWith(["shape-1"]);
     expect(addTextBox).toHaveBeenCalledTimes(2);
     expect(selectShapes).toHaveBeenCalledWith(["shape-2"]);
-    expect(fetchMock.mock.calls[3][0]).toBe("/native-helper/equation/convert-shape-ranges");
+    expect(fetchMock.mock.calls[2][0]).toBe("/native-helper/equation/convert-shape-ranges");
     expect(result.id).toBe("shape-4");
     expect(result.nativeCount).toBe(1);
   });

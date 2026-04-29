@@ -57,15 +57,13 @@ cat > "$STAGE_DIR/README.txt" <<EOF
 SlideSCI for Mac v${VERSION}
 
 安装步骤：
-1. 请优先双击 install-slidesci-mac.command。
-2. 如果你的 Mac 还没有安装 Node.js，请先安装 Node.js LTS：
+1. 如果你的 Mac 还没有安装 Node.js，请先安装 Node.js LTS：
    https://nodejs.org/
-3. 确保 Microsoft PowerPoint 已完全退出。
-4. 双击运行 install-slidesci-mac.command。
-5. 如果 macOS 阻止运行，请优先执行：
+2. 确保 Microsoft PowerPoint 已完全退出。
+3. 解压后请先在终端执行下面的命令，移除 macOS 给下载文件附加的隔离标记。建议先执行这一步，再双击任何 .command 文件：
    xattr -dr com.apple.quarantine "/你的解压目录/${ARTIFACT_NAME}"
-   然后再双击 install-slidesci-mac.command。
-   如果仍被阻止，再右键该文件，选择“打开”，再确认一次。
+4. 双击运行 install-slidesci-mac.command。
+5. 如果仍被阻止，再右键该文件，选择“打开”，再确认一次。
 6. 安装脚本会自动：
    - 安装 SlideSCICompanion
    - 安装本地公式 helper
@@ -75,7 +73,7 @@ SlideSCI for Mac v${VERSION}
    - 复制 manifest.xml 到 PowerPoint 侧载目录
 7. 如果系统弹出权限提示，请允许：
    - SlideSCI Companion.app 在“自动化”中控制 System Events
-   - 如果系统同时提示辅助功能权限，也允许 SlideSCI Companion.app 控制电脑
+   - 必须在“辅助功能”中允许 SlideSCI Companion.app 控制电脑，否则 Markdown 公式和“插入 LaTeX 原生公式”只能停留为纯文本，不能自动转换为 PowerPoint 原生公式对象
 8. 安装完成后，重新打开 PowerPoint。
 9. 在 PowerPoint 的“开始”选项卡中找到 SlideSCI 分组里的“打开 SlideSCI”按钮；如果没有直接显示，也可以先打开“加载项”，再选择 SlideSCI。
 10. 点击后会打开右侧的 SlideSCI 任务窗格。
@@ -85,6 +83,7 @@ SlideSCI for Mac v${VERSION}
 - 当前版本仍需要本机安装 Node.js，以运行 native-equation-helper.mjs 和本地任务窗格服务。
 - 默认本地加载地址：${ADDIN_BASE_URL}
 - PowerPoint 打开时，companion 会自动拉起 helper；PowerPoint 完全退出后，helper 会自动停止。
+- 公式内容要从纯文本自动转换为 PowerPoint 原生公式对象，必须给 SlideSCI Companion.app 辅助功能权限。
 - 如需临时完全停用 SlideSCI，而不是卸载，请双击 stop-slidesci-mac.command。
 - 如需重新启用，请双击 start-slidesci-mac.command。
 

@@ -11,6 +11,7 @@ const PORT = Number(process.env.SLIDESCI_NATIVE_HELPER_PORT || 17926);
 export const SCRIPT_EXECUTION_MODE = "temp-file";
 const APPLESCRIPT_RUNNER = process.env.SLIDESCI_APPLESCRIPT_RUNNER || "";
 const APPLESCRIPT_RUNNER_QUEUE = process.env.SLIDESCI_APPLESCRIPT_RUNNER_QUEUE || "";
+const RUNTIME_OSACOMPILE_ENABLED = process.env.SLIDESCI_RUNTIME_OSACOMPILE === "1";
 
 const POWERPOINT_PROCESS_NAME = "Microsoft PowerPoint";
 const MENU_LABELS = {
@@ -128,9 +129,11 @@ async function compileAppleScriptIfAvailable(scriptPath) {
 
 async function runOsaScript(kind, script) {
   return withTempAppleScript(kind, script, async ({ scriptPath }) => {
-    const syntaxCheck = await compileAppleScriptIfAvailable(scriptPath);
-    if (syntaxCheck.ok === false) {
-      throw new Error(`AppleScript 编译失败：${syntaxCheck.message}`);
+    if (RUNTIME_OSACOMPILE_ENABLED) {
+      const syntaxCheck = await compileAppleScriptIfAvailable(scriptPath);
+      if (syntaxCheck.ok === false) {
+        throw new Error(`AppleScript 编译失败：${syntaxCheck.message}`);
+      }
     }
     if (APPLESCRIPT_RUNNER_QUEUE) {
       return runAppleScriptViaRunnerQueue(scriptPath);
@@ -489,25 +492,33 @@ async function probeGuiAutomation() {
   }
 }
 
+let equationScriptSyntaxCache;
+
 async function probeEquationScriptSyntax() {
+  if (equationScriptSyntaxCache) {
+    return equationScriptSyntaxCache;
+  }
   return withTempAppleScript("syntax-check", buildSyntaxProbeScript(), async ({ scriptPath }) => {
     const syntaxCheck = await compileAppleScriptIfAvailable(scriptPath);
     if (syntaxCheck.ok === false) {
-      return {
+      equationScriptSyntaxCache = {
         ok: false,
         message: syntaxCheck.message,
       };
+      return equationScriptSyntaxCache;
     }
     if (syntaxCheck.ok === true) {
-      return {
+      equationScriptSyntaxCache = {
         ok: true,
         message: syntaxCheck.message,
       };
+      return equationScriptSyntaxCache;
     }
-    return {
+    equationScriptSyntaxCache = {
       ok: undefined,
       message: syntaxCheck.message,
     };
+    return equationScriptSyntaxCache;
   });
 }
 

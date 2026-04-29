@@ -18,7 +18,7 @@ npm run dev
 npm run helper
 ```
 
-helper 监听 `http://127.0.0.1:17926`，负责通过 PowerPoint 界面自动化创建原生公式对象。安装版默认通过 `SlideSCI Companion.app` 执行本地 AppleScript；首次使用公式功能时，通常需要在“系统设置 > 隐私与安全性 > 自动化”中允许 `SlideSCI Companion.app` 控制 `System Events`。
+helper 监听 `http://127.0.0.1:17926`，负责通过 PowerPoint 界面自动化创建原生公式对象。安装版默认通过 `SlideSCI Companion.app` 执行本地 AppleScript；首次使用公式功能时，通常需要在“系统设置 > 隐私与安全性 > 自动化”中允许 `SlideSCI Companion.app` 控制 `System Events`，并在“系统设置 > 隐私与安全性 > 辅助功能”中允许 `SlideSCI Companion.app` 控制电脑。没有辅助功能权限时，公式内容只能以纯文本保留，不能自动转换为 PowerPoint 公式对象。
 
 否则含公式模块会失败并在状态栏显示原因，不会静默降级成图片。
 
@@ -55,23 +55,21 @@ node scripts/local-addin-server.mjs \
    当前版本仍依赖本机 `node` 来运行本地公式 helper 和本地 taskpane 服务；如果没有 `node`，安装脚本会退出。
 4. 在安装前，先完全退出 Microsoft PowerPoint
 5. 双击下载好的 `SlideSCI-for-Mac-vX.Y.Z.zip`，解压得到一个文件夹
-6. 进入解压后的文件夹，双击：
-   `install-slidesci-mac.command`
-
-   建议解压后直接运行下面的命令来防止 macOS 反复阻止运行 `.command` 文件。在终端执行：
+6. 先在终端执行下面的命令，移除 macOS 给下载文件附加的隔离标记。建议先执行这一步，再双击任何 `.command` 文件，否则 macOS 可能会反复提示“无法打开”或要求去“隐私与安全性”里手动放行：
 
 ```bash
 xattr -dr com.apple.quarantine "/你的解压目录/SlideSCI-for-Mac-vX.Y.Z"
 ```
 
-   然后再双击 `install-slidesci-mac.command`。
+7. 进入解压后的文件夹，双击：
+   `install-slidesci-mac.command`
 
    如果仍被阻止：
 
 - 右键该文件，选择“打开”
 - 再次点击“打开”
 
-7. 安装脚本会自动完成这些事情：
+8. 安装脚本会自动完成这些事情：
 
    - 安装 `SlideSCICompanion`
    - 复制本地公式 helper
@@ -79,14 +77,14 @@ xattr -dr com.apple.quarantine "/你的解压目录/SlideSCI-for-Mac-vX.Y.Z"
    - 生成并信任本地 HTTPS 证书
    - 注册 `launchd` 用户级 LaunchAgent
    - 复制 `manifest.xml` 到 PowerPoint 的侧载目录
-8. 首次使用时，如果系统弹出权限提示，请允许：
+9. 首次使用时，如果系统弹出权限提示，请允许：
 
    - `SlideSCI Companion.app` 在“自动化”中控制 `System Events`
-   - 如果系统同时提示辅助功能权限，也允许 `SlideSCI Companion.app` 控制电脑
-9. 安装完成后，重新打开 PowerPoint
-10. 在 PowerPoint 的 **“开始”** 选项卡中找到 **SlideSCI** 分组里的 **“打开 SlideSCI”** 按钮
-11. 如果没有直接显示，可以先打开 **“加载项”**，再选择 **SlideSCI**
-12. 点击后会打开右侧的 SlideSCI 任务窗格
+   - 必须在“辅助功能”中允许 `SlideSCI Companion.app` 控制电脑，否则 Markdown 公式和“插入 LaTeX 原生公式”只能停留为纯文本，不能自动转换为 PowerPoint 原生公式对象
+10. 安装完成后，重新打开 PowerPoint
+11. 在 PowerPoint 的 **“开始”** 选项卡中找到 **SlideSCI** 分组里的 **“打开 SlideSCI”** 按钮
+12. 如果没有直接显示，可以先打开 **“加载项”**，再选择 **SlideSCI**
+13. 点击后会打开右侧的 SlideSCI 任务窗格
 
 安装完成后的行为：
 

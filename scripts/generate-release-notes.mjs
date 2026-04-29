@@ -20,7 +20,7 @@ const body = `## 安装
 1. 下载并解压 \`${artifactName}\`
 2. 如果你的 Mac 还没有安装 Node.js，请先安装 Node.js LTS：<https://nodejs.org/>
 3. 确保 Microsoft PowerPoint 已完全退出
-4. 如果 macOS 反复阻止运行 \`.command\` 文件，请先在终端执行：
+4. 解压后请先在终端执行下面的命令，移除 macOS 给下载文件附加的隔离标记。建议先执行这一步，再双击任何 \`.command\` 文件，否则 macOS 可能会反复提示“无法打开”或要求去“隐私与安全性”里手动放行：
 
 \`\`\`bash
 xattr -dr com.apple.quarantine "/你的解压目录/${artifactName.replace(".zip", "")}"
@@ -32,7 +32,7 @@ xattr -dr com.apple.quarantine "/你的解压目录/${artifactName.replace(".zip
 8. 安装脚本会同时安装本地任务窗格 HTTPS 服务，并在首次安装时把本地证书加入登录钥匙串
 9. 如果系统弹出权限提示，请允许：
    - \`SlideSCI Companion.app\` 在“自动化”中控制 \`System Events\`
-   - 如果系统同时提示辅助功能权限，也允许 \`SlideSCI Companion.app\` 控制电脑
+   - 必须在“辅助功能”中允许 \`SlideSCI Companion.app\` 控制电脑，否则 Markdown 公式和“插入 LaTeX 原生公式”只能停留为纯文本，不能自动转换为 PowerPoint 原生公式对象
 10. 重新打开 PowerPoint
 11. 在 PowerPoint 的 **“开始”** 选项卡中找到 **SlideSCI** 分组里的 **“打开 SlideSCI”** 按钮；如果没有直接显示，也可以先打开 **“加载项”**，再选择 **SlideSCI**
 12. 点击后会打开右侧的 SlideSCI 任务窗格
@@ -48,6 +48,7 @@ xattr -dr com.apple.quarantine "/你的解压目录/${artifactName.replace(".zip
 - 当前版本仍要求本机已安装 Node.js，因为本地公式 helper 和本地任务窗格服务都通过 Node 运行
 - 运行时不依赖 GitHub Pages；加载项页面默认由本机地址提供：${addinBaseUrl}
 - PowerPoint 打开时，companion 会自动拉起 helper；PowerPoint 完全退出后，helper 会自动停止
+- 公式内容要从纯文本自动转换为 PowerPoint 原生公式对象，必须给 \`SlideSCI Companion.app\` 辅助功能权限
 
 ## 卸载
 
