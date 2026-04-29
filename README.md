@@ -2,6 +2,30 @@
 
 这是 SlideSCI 的 Mac PowerPoint Office.js 版本。它是一个独立工程，所有代码都放在 `slidesci_for_mac/` 下，不引用 Windows VSTO 工程。
 
+## 当前功能
+
+- 图片自动排列：列最大宽度、统一高度、统一宽度瀑布流。
+- 图片标题：为选中对象添加上标题或下标题。
+- 图片标签：支持字母、数字、罗马数字、圆圈数字、中文数字模板。
+- 内容插入：Prism 高亮代码块、Markdown 富文本/原生表格/原生公式/引用块、LaTeX 原生公式、LaTeX 图片。
+- 格式工具：复制和粘贴中心位置、宽度、高度、文字/填充/边框基础格式。
+
+## Markdown 与 LaTeX 验收
+
+`test.md` 是固定回归样例。把它全文复制到 Markdown 输入框后，应按原文顺序插入标题、普通段落、普通列表、任务列表、表格、数学公式、代码块、引述块和有序列表，直到“归档步骤”结束。任务列表会转换成 `☑` / `☐` 前缀；表格会去掉单元格内的 Markdown 标记；行内公式会保留在同一个文本框中，并由 helper 直接创建为 PowerPoint 原生公式。
+
+表格、代码块、块级公式和引述块会作为独立模块插入。某个模块在当前 PowerPoint API 下失败时，插件会继续插入后续模块，并在状态栏显示失败原因。表格优先使用原生 PowerPoint table：先创建空表格，只传 `left/top/width/height`，再通过 table cell API 逐格写入内容；如果该路径失败，才尝试 `values` 参数和文本框网格降级。
+
+块级公式优先通过 helper 生成原生公式；helper 未运行或权限不足时，该公式模块会明确失败，防止把原生公式需求误做成图片。“插入 LaTeX 原生公式”只走 helper；“插入 LaTeX 图片”才使用 MathJax PNG 图片路径。图片插入优先使用矩形图片填充，避免依赖 Mac 端可能不可用的 `addPicture` preview API；如果图片路径全部不可用，才降级为 LaTeX 源码文本框。选中由本插件插入的公式后点击“读取选中 LaTeX”，会按 tags -> alt text -> localStorage 的顺序回填公式输入框。
+
+如果修改代码后 PowerPoint 里仍显示旧界面，先完全退出 PowerPoint，再清理缓存：
+
+```bash
+rm -rf ~/Library/Containers/com.microsoft.Powerpoint/Data/Library/Caches/Wef
+```
+
+受 Office.js 能力限制，原生公式依赖本地 helper 和 macOS 自动化权限；导出原图、复制大图、裁剪复制等 Windows VSTO 专属功能暂未实现。
+
 ## 开发
 
 ```bash
@@ -220,27 +244,3 @@ Mac PowerPoint 本地侧载传统 XML manifest：
 4. 清理 Office 缓存后再试：删除 `~/Library/Containers/com.microsoft.Powerpoint/Data/Library/Caches` 下的 Office 相关缓存。
 5. 如果你使用 release 安装方式，请查看 `~/Library/Application Support/SlideSCI/companion.log`，确认本地 taskpane 服务已经启动。
 6. 如果你使用源码开发方式，请确认 `npm run dev` 正在运行，并且 Safari 可以打开 `https://localhost:3000/index.html`。
-
-## 当前功能
-
-- 图片自动排列：列最大宽度、统一高度、统一宽度瀑布流。
-- 图片标题：为选中对象添加上标题或下标题。
-- 图片标签：支持字母、数字、罗马数字、圆圈数字、中文数字模板。
-- 内容插入：Prism 高亮代码块、Markdown 富文本/原生表格/原生公式/引用块、LaTeX 原生公式、LaTeX 图片。
-- 格式工具：复制和粘贴中心位置、宽度、高度、文字/填充/边框基础格式。
-
-## Markdown 与 LaTeX 验收
-
-`test.md` 是固定回归样例。把它全文复制到 Markdown 输入框后，应按原文顺序插入标题、普通段落、普通列表、任务列表、表格、数学公式、代码块、引述块和有序列表，直到“归档步骤”结束。任务列表会转换成 `☑` / `☐` 前缀；表格会去掉单元格内的 Markdown 标记；行内公式会保留在同一个文本框中，并由 helper 直接创建为 PowerPoint 原生公式。
-
-表格、代码块、块级公式和引述块会作为独立模块插入。某个模块在当前 PowerPoint API 下失败时，插件会继续插入后续模块，并在状态栏显示失败原因。表格优先使用原生 PowerPoint table：先创建空表格，只传 `left/top/width/height`，再通过 table cell API 逐格写入内容；如果该路径失败，才尝试 `values` 参数和文本框网格降级。
-
-块级公式优先通过 helper 生成原生公式；helper 未运行或权限不足时，该公式模块会明确失败，防止把原生公式需求误做成图片。“插入 LaTeX 原生公式”只走 helper；“插入 LaTeX 图片”才使用 MathJax PNG 图片路径。图片插入优先使用矩形图片填充，避免依赖 Mac 端可能不可用的 `addPicture` preview API；如果图片路径全部不可用，才降级为 LaTeX 源码文本框。选中由本插件插入的公式后点击“读取选中 LaTeX”，会按 tags -> alt text -> localStorage 的顺序回填公式输入框。
-
-如果修改代码后 PowerPoint 里仍显示旧界面，先完全退出 PowerPoint，再清理缓存：
-
-```bash
-rm -rf ~/Library/Containers/com.microsoft.Powerpoint/Data/Library/Caches/Wef
-```
-
-受 Office.js 能力限制，原生公式依赖本地 helper 和 macOS 自动化权限；导出原图、复制大图、裁剪复制等 Windows VSTO 专属功能暂未实现。
