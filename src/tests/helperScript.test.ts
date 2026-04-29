@@ -1,13 +1,14 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const HAS_OSACOMPILE = existsSync("/usr/bin/osacompile");
+const HELPER_SOURCE_PATH = resolve(process.cwd(), "scripts/native-equation-helper.mjs");
 
 async function expectAppleScriptToCompile(script: string, name: string): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "slidesci-helper-test-"));
@@ -29,6 +30,7 @@ describe("native equation helper script exports", () => {
   it("exposes pure helper metadata without VBA automation", async () => {
     // @ts-expect-error The helper is a Node .mjs script outside the TS source tree.
     const helper = await import("../../scripts/native-equation-helper.mjs");
+    const helperSource = await readFile(HELPER_SOURCE_PATH, "utf8");
 
     const convertScript = helper.buildConvertSelectionScript();
     const probeScript = helper.buildGuiAutomationProbeScript();
@@ -44,9 +46,14 @@ describe("native equation helper script exports", () => {
     expect(syntaxProbeScript).not.toContain("do Visual Basic");
     expect(shapeRangesScript).not.toContain("do Visual Basic");
     expect(convertScript).toContain("System Events");
+    expect(probeScript).not.toContain("UI elements enabled");
+    expect(convertScript).not.toContain("UI elements enabled");
+    expect(shapeRangesScript).not.toContain("UI elements enabled");
     expect(convertScript).toContain("Insert");
     expect(convertScript).toContain("Equation");
-    expect(convertScript).toContain("on tryInsertEquation(processName, menuCandidates, itemCandidates)");
+    expect(convertScript).not.toContain("do shell script");
+    expect(convertScript).toContain("on eqInsertHandler(processName, firstChoices, secondChoices)");
+    expect(helperSource).not.toContain("--equation-shortcut");
     expect(convertScript).toContain("on replaceRangeAndConvert(processName, startIndex, lengthValue, latexText)");
     expect(convertScript).not.toContain("LaTeX 转数学公式");
     expect(convertScript).not.toContain("Professional");
@@ -58,7 +65,7 @@ describe("native equation helper script exports", () => {
     expect(convertScript).not.toContain("“");
     expect(convertScript).not.toContain("”");
     expect(convertScript).toContain("return \"equation-insert\"");
-    expect(convertScript).toContain('keystroke "=" using {option down}');
+    expect(convertScript).not.toContain('keystroke "=" using {option down}');
     expect(convertScript).not.toContain('keystroke "=" using {control down}');
     expect(convertScript).toContain('error (prefixText & errMsg) number errNum');
     expect(convertScript).toContain('my raiseScriptError("无法通过辅助功能选择文本范围：", errMsg, errNum)');
@@ -66,6 +73,16 @@ describe("native equation helper script exports", () => {
     expect(convertScript).not.toContain("AXSelectedTextRange=no:");
     expect(convertScript).not.toContain("encodeConversionResult");
     expect(convertScript).not.toMatch(/error\s+"[^"]*"\s*&\s*.*number\s+errNum/);
+    expect(helperSource).not.toContain("do Visual Basic");
+    expect(helperSource).not.toContain("ExecuteMso");
+    expect(helperSource).not.toContain("EquationProfessional");
+    expect(helperSource).not.toContain("buildPowerPointAutomationProbeScript");
+    expect(helperSource).not.toContain("buildConvertSelectionPowerPointScript");
+    expect(helperSource).not.toContain("buildConvertShapeRangesPowerPointScript");
+    expect(helperSource).not.toContain("runNativeCompanionProbe");
+    expect(helperSource).not.toContain("runNativeCompanionConvertSelection");
+    expect(helperSource).not.toContain("runNativeCompanionConvertShapeRanges");
+    expect(helperSource).not.toContain("powerpoint-probe");
     expect(syntaxProbeScript).toContain("return \"equation-insert\"");
     expect(shapeRangesScript).toContain("AXSelectedTextRange");
     expect(helper.HELPER_ENDPOINTS).toContain("POST /equation/convert-selection");

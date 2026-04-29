@@ -9,6 +9,13 @@ HELPER_DIR="$INSTALL_ROOT/helper"
 SERVER_DIR="$INSTALL_ROOT/server"
 WEB_DIR="$INSTALL_ROOT/web"
 CERT_DIR="$INSTALL_ROOT/certs"
+APPLICATIONS_DIR="${HOME}/Applications"
+COMPANION_APP_NAME="SlideSCI Companion.app"
+COMPANION_APP_DIR="$APPLICATIONS_DIR/$COMPANION_APP_NAME"
+COMPANION_APP_CONTENTS="$COMPANION_APP_DIR/Contents"
+COMPANION_APP_MACOS_DIR="$COMPANION_APP_CONTENTS/MacOS"
+COMPANION_APP_RESOURCES_DIR="$COMPANION_APP_CONTENTS/Resources"
+COMPANION_APP_BINARY="$COMPANION_APP_MACOS_DIR/SlideSCICompanion"
 MANIFEST_DIR="${HOME}/Library/Containers/com.microsoft.Powerpoint/Data/Documents/wef"
 LAUNCH_AGENT_DIR="${HOME}/Library/LaunchAgents"
 LAUNCH_AGENT_ID="com.slidesci.helper-watcher"
@@ -22,7 +29,6 @@ CERT_PATH="$CERT_DIR/slidesci-local-cert.pem"
 KEY_PATH="$CERT_DIR/slidesci-local-key.pem"
 TMP_MANIFEST="$(mktemp /tmp/slidesci-manifest.XXXXXX.xml)"
 TMP_OPENSSL_CONFIG="$(mktemp /tmp/slidesci-openssl.XXXXXX.cnf)"
-TMP_AUTOMATION_PROBE="$(mktemp /tmp/slidesci-automation-probe.XXXXXX.applescript)"
 
 PACKAGE_HELPER_SCRIPT="$SCRIPT_DIR/helper/native-equation-helper.mjs"
 SOURCE_HELPER_SCRIPT="$SOURCE_ROOT/scripts/native-equation-helper.mjs"
@@ -38,7 +44,7 @@ BUILD_COMPANION_SCRIPT="$SOURCE_ROOT/scripts/build-companion.sh"
 RENDER_MANIFEST_SCRIPT="$SOURCE_ROOT/scripts/render-manifest.mjs"
 
 cleanup_tmp_files() {
-  rm -f "$TMP_MANIFEST" "$TMP_OPENSSL_CONFIG" "$TMP_AUTOMATION_PROBE"
+  rm -f "$TMP_MANIFEST" "$TMP_OPENSSL_CONFIG"
 }
 
 trap cleanup_tmp_files EXIT
@@ -122,6 +128,46 @@ copy_companion() {
     echo "如果你是从 GitHub Release 安装，请确认 zip 已完整解压，并保留 bin/ 文件夹。"
     echo "如果你是从源码安装，请确认仓库结构完整。"
     exit 1
+  fi
+}
+
+install_companion_app_bundle() {
+  rm -rf "$COMPANION_APP_DIR"
+  mkdir -p "$COMPANION_APP_MACOS_DIR" "$COMPANION_APP_RESOURCES_DIR"
+  cp "$BIN_DIR/SlideSCICompanion" "$COMPANION_APP_BINARY"
+  chmod +x "$COMPANION_APP_BINARY"
+  cat > "$COMPANION_APP_CONTENTS/Info.plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>SlideSCICompanion</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.slidesci.companion</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>SlideSCI Companion</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>SlideSCI needs to control System Events to create native equations in Microsoft PowerPoint.</string>
+  </dict>
+</plist>
+EOF
+
+  codesign --force --deep --sign - --identifier com.slidesci.companion "$COMPANION_APP_DIR" >/dev/null 2>&1 || true
+  if [ -x "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister" ]; then
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$COMPANION_APP_DIR" >/dev/null 2>&1 || true
   fi
 }
 
@@ -245,25 +291,35 @@ wait_for_local_server() {
 }
 
 request_permission_probe() {
-  cat > "$TMP_AUTOMATION_PROBE" <<'EOF'
+  local probe_file
+  "$COMPANION_APP_BINARY" --request-accessibility-permission >/dev/null 2>&1 || true
+
+  probe_file="$(mktemp /tmp/slidesci-system-events-probe.XXXXXX.applescript)"
+  cat > "$probe_file" <<'EOF'
 tell application "System Events"
-  return UI elements enabled
+  try
+    return UI elements enabled
+  on error errMsg number errNum
+    error errMsg number errNum
+  end try
 end tell
 EOF
-
-  "$BIN_DIR/SlideSCICompanion" --run-applescript-file "$TMP_AUTOMATION_PROBE" >/dev/null 2>&1 || true
+  "$COMPANION_APP_BINARY" --run-applescript-file "$probe_file" >/dev/null 2>&1 || true
+  rm -f "$probe_file"
 }
 
 require_command "python3" "未检测到 python3，无法安装 SlideSCI。"
 require_command "node" "未检测到 node。当前安装脚本仍需要 node 运行 helper 和本地任务窗格服务。请先安装 Node.js LTS。"
 require_command "openssl" "未检测到 openssl，无法生成本地 HTTPS 证书。"
 require_command "curl" "未检测到 curl，无法验证本地任务窗格服务。"
+require_command "codesign" "未检测到 codesign，无法封装 SlideSCI Companion.app。"
 
 NODE_BIN="$(command -v node)"
 
-mkdir -p "$BIN_DIR" "$HELPER_DIR" "$SERVER_DIR" "$CERT_DIR" "$MANIFEST_DIR" "$LAUNCH_AGENT_DIR"
+mkdir -p "$BIN_DIR" "$HELPER_DIR" "$SERVER_DIR" "$CERT_DIR" "$MANIFEST_DIR" "$LAUNCH_AGENT_DIR" "$APPLICATIONS_DIR"
 
 copy_companion
+install_companion_app_bundle
 copy_helper
 copy_local_server
 copy_web_assets
@@ -273,6 +329,7 @@ render_manifest
 cp "$TMP_MANIFEST" "$MANIFEST_DIR/manifest.xml"
 
 chmod +x "$BIN_DIR/SlideSCICompanion"
+chmod +x "$COMPANION_APP_BINARY"
 
 if command -v xattr >/dev/null 2>&1; then
   xattr -dr com.apple.quarantine "$INSTALL_ROOT" >/dev/null 2>&1 || true
@@ -287,7 +344,10 @@ cat > "$LAUNCH_AGENT_PATH" <<PLIST
     <string>$LAUNCH_AGENT_ID</string>
     <key>ProgramArguments</key>
     <array>
-      <string>$BIN_DIR/SlideSCICompanion</string>
+      <string>/usr/bin/open</string>
+      <string>-W</string>
+      <string>$COMPANION_APP_DIR</string>
+      <string>--args</string>
       <string>--helper-command</string>
       <string>$NODE_BIN</string>
       <string>--helper-script</string>
@@ -338,12 +398,14 @@ TASKPANE_URL="$(extract_taskpane_url "$TMP_MANIFEST" || true)"
 echo "SlideSCI 已安装。"
 echo "1. manifest 已复制到 $MANIFEST_DIR/manifest.xml"
 echo "2. 本地任务窗格服务已就绪：${MANIFEST_BASE_URL}/health"
-echo "3. companion LaunchAgent 已注册：$LAUNCH_AGENT_PATH"
-echo "4. PowerPoint 打开时，公式 helper 会由 SlideSCICompanion 自动拉起；PowerPoint 完全退出后会自动停止。"
-echo "5. 如需公式自动转换，请在“系统设置 > 隐私与安全性 > 自动化”中允许 SlideSCICompanion 控制 System Events。"
-echo "6. 同时请在“系统设置 > 隐私与安全性 > 辅助功能”中允许 SlideSCICompanion 控制电脑。"
-echo "7. 如果你想临时完全关停 SlideSCI，请双击 stop-slidesci-mac.command；恢复时双击 start-slidesci-mac.command。"
-echo "8. 请完全退出并重启 PowerPoint。插件入口位于“开始”选项卡中的 SlideSCI 分组里的“打开 SlideSCI”按钮；如未直接显示，也可从“加载项”中选择 SlideSCI。"
+echo "3. SlideSCI Companion.app 已安装到：$COMPANION_APP_DIR"
+echo "4. companion LaunchAgent 已注册：$LAUNCH_AGENT_PATH"
+echo "5. PowerPoint 打开时，公式 helper 会由 SlideSCI Companion.app 自动拉起；PowerPoint 完全退出后会自动停止。"
+echo "6. 如需公式自动转换，请在“系统设置 > 隐私与安全性 > 自动化”中允许 SlideSCI Companion.app 控制 System Events。"
+echo "7. 如果系统里已经存在旧的 SlideSCICompanion 或旧的 SlideSCI 自动化权限项，请先删除旧项，再确认新的 SlideSCI Companion.app 已打开。"
+echo "8. 授权完成后，请完全退出并重新打开 PowerPoint；如仍未生效，再执行一次 stop-slidesci-mac.command 后重新安装。"
+echo "9. 如果你想临时完全关停 SlideSCI，请双击 stop-slidesci-mac.command；恢复时双击 start-slidesci-mac.command。"
+echo "10. 请完全退出并重启 PowerPoint。插件入口位于“开始”选项卡中的 SlideSCI 分组里的“打开 SlideSCI”按钮；如未直接显示，也可从“加载项”中选择 SlideSCI。"
 if [ -n "$TASKPANE_URL" ]; then
-  echo "9. Taskpane 地址：$TASKPANE_URL"
+  echo "11. Taskpane 地址：$TASKPANE_URL"
 fi

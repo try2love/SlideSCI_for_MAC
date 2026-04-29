@@ -8,6 +8,7 @@ declare module "node:fs" {
 
 declare module "node:fs/promises" {
   export const mkdtemp: any;
+  export const readFile: any;
   export const rm: any;
   export const writeFile: any;
 }
@@ -18,6 +19,7 @@ declare module "node:os" {
 
 declare module "node:path" {
   export const join: any;
+  export const resolve: any;
 }
 
 declare module "node:util" {

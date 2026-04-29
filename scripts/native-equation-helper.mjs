@@ -1,7 +1,7 @@
 import http from "node:http";
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -10,6 +10,7 @@ const HOST = "127.0.0.1";
 const PORT = Number(process.env.SLIDESCI_NATIVE_HELPER_PORT || 17926);
 export const SCRIPT_EXECUTION_MODE = "temp-file";
 const APPLESCRIPT_RUNNER = process.env.SLIDESCI_APPLESCRIPT_RUNNER || "";
+const APPLESCRIPT_RUNNER_QUEUE = process.env.SLIDESCI_APPLESCRIPT_RUNNER_QUEUE || "";
 
 const POWERPOINT_PROCESS_NAME = "Microsoft PowerPoint";
 const MENU_LABELS = {
@@ -131,11 +132,59 @@ async function runOsaScript(kind, script) {
     if (syntaxCheck.ok === false) {
       throw new Error(`AppleScript 编译失败：${syntaxCheck.message}`);
     }
+    if (APPLESCRIPT_RUNNER_QUEUE) {
+      return runAppleScriptViaRunnerQueue(scriptPath);
+    }
     const command = APPLESCRIPT_RUNNER || "osascript";
     const args = APPLESCRIPT_RUNNER ? ["--run-applescript-file", scriptPath] : [scriptPath];
     const { stdout } = await execFileAsync(command, args, { timeout: 8000 });
     return stdout;
   });
+}
+
+async function sleep(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runAppleScriptViaRunnerQueue(scriptPath) {
+  const id = randomUUID();
+  await mkdir(APPLESCRIPT_RUNNER_QUEUE, { recursive: true });
+  const requestPath = join(APPLESCRIPT_RUNNER_QUEUE, `${id}.request.json`);
+  const pendingPath = join(APPLESCRIPT_RUNNER_QUEUE, `${id}.pending.json`);
+  const responsePath = join(APPLESCRIPT_RUNNER_QUEUE, `${id}.response.json`);
+  await writeFile(pendingPath, JSON.stringify({ id, scriptPath }), "utf8");
+  await rename(pendingPath, requestPath);
+
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    try {
+      const raw = await readFile(responsePath, "utf8");
+      await rm(responsePath, { force: true });
+      const response = JSON.parse(raw);
+      if (response.ok) {
+        return String(response.stdout || "").trim();
+      }
+      throw new Error(String(response.stderr || "Companion AppleScript runner 执行失败。"));
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+        await sleep(50);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  await rm(requestPath, { force: true });
+  await rm(pendingPath, { force: true });
+  throw new Error("Companion AppleScript runner 超时。");
+}
+
+async function isPowerPointRunningViaApplicationQuery() {
+  try {
+    return (await runOsaScript("powerpoint-running-app", buildPowerPointRunningScript())) === "true";
+  } catch {
+    return false;
+  }
 }
 
 async function readBody(req) {
@@ -173,20 +222,21 @@ export function buildGuiAutomationProbeScript() {
   return `
 set processName to ${appleScriptString(POWERPOINT_PROCESS_NAME)}
 tell application "System Events"
-  set automationEnabled to UI elements enabled
   set powerpointRunning to exists process processName
-  if automationEnabled is false then
-    return "ui-disabled"
-  end if
   if powerpointRunning is false then
     return "powerpoint-not-running"
   end if
   tell process processName
     set frontmost to true
+    exists menu bar 1
     return "ok"
   end tell
 end tell
 `.trim();
+}
+
+export function buildPowerPointRunningScript() {
+  return 'return application "Microsoft PowerPoint" is running';
 }
 
 export function buildSyntaxProbeScript() {
@@ -207,7 +257,7 @@ set processName to ${appleScriptString(POWERPOINT_PROCESS_NAME)}
 set insertMenuCandidates to ${appleScriptList(MENU_LABELS.insertMenu)}
 set equationItemCandidates to ${appleScriptList(MENU_LABELS.equationItem)}
 
-on firstExistingMenuBarItem(processName, candidates)
+on findCandidateMenuName(processName, candidates)
   tell application "System Events"
     tell process processName
       repeat with candidateName in candidates
@@ -218,12 +268,12 @@ on firstExistingMenuBarItem(processName, candidates)
     end tell
   end tell
   error "未找到可用菜单栏项目。"
-end firstExistingMenuBarItem
+end findCandidateMenuName
 
-on clickFirstMatchingMenuItem(processName, menuCandidates, itemCandidates)
+on runChosenAction(processName, menuCandidates, itemCandidates)
   tell application "System Events"
     tell process processName
-      set menuBarName to my firstExistingMenuBarItem(processName, menuCandidates)
+      set menuBarName to my findCandidateMenuName(processName, menuCandidates)
       repeat with itemName in itemCandidates
         try
           click menu item (contents of itemName) of menu 1 of menu bar item menuBarName of menu bar 1
@@ -233,7 +283,7 @@ on clickFirstMatchingMenuItem(processName, menuCandidates, itemCandidates)
     end tell
   end tell
   error "未找到菜单命令。"
-end clickFirstMatchingMenuItem
+end runChosenAction
 
 on raiseScriptError(prefixText, errMsg, errNum)
   error (prefixText & errMsg) number errNum
@@ -241,9 +291,6 @@ end raiseScriptError
 
 on ensureFocusedEditableElement(processName)
   tell application "System Events"
-    if UI elements enabled is false then
-      error "macOS 未授予辅助功能权限，helper 无法驱动 PowerPoint 界面。"
-    end if
     tell process processName
       set frontmost to true
       try
@@ -297,21 +344,12 @@ on reselectRange(processName, startIndex, lengthValue)
   delay 0.05
 end reselectRange
 
-on tryInsertEquation(processName, menuCandidates, itemCandidates)
-  try
-    return my clickFirstMatchingMenuItem(processName, menuCandidates, itemCandidates)
-  on error
-    tell application "System Events"
-      tell process processName
-        keystroke "=" using {option down}
-      end tell
-    end tell
-    return "shortcut"
-  end try
-end tryInsertEquation
+on eqInsertHandler(processName, firstChoices, secondChoices)
+  return my runChosenAction(processName, firstChoices, secondChoices)
+end eqInsertHandler
 
 on triggerEquationForRange(processName)
-  return my tryInsertEquation(processName, insertMenuCandidates, equationItemCandidates)
+  return my eqInsertHandler(processName, insertMenuCandidates, equationItemCandidates)
 end triggerEquationForRange
 
 on replaceRangeAndConvert(processName, startIndex, lengthValue, latexText)
@@ -330,9 +368,6 @@ export function buildConvertSelectionScript(payload = {}) {
   return buildEquationAutomationScript(
     `
 tell application "System Events"
-  if UI elements enabled is false then
-    error "macOS 未授予辅助功能权限，helper 无法驱动 PowerPoint 界面。"
-  end if
   if not (exists process processName) then
     error "未检测到 Microsoft PowerPoint。"
   end if
@@ -341,8 +376,19 @@ tell application "System Events"
   end tell
 end tell
 delay 0.10
-my tryInsertEquation(processName, insertMenuCandidates, equationItemCandidates)
+my eqInsertHandler(processName, insertMenuCandidates, equationItemCandidates)
 return "equation-insert"
+`,
+  );
+}
+
+export function buildPrepareShapeRangeScript(placeholder = {}) {
+  const latex = normalizeLatexInput(placeholder.latex);
+  return buildEquationAutomationScript(
+    `
+my replaceRangeText(processName, ${escapeAppleScriptInteger(placeholder.start)}, ${escapeAppleScriptInteger(placeholder.length, latex.length)}, ${appleScriptString(latex)})
+my reselectRange(processName, ${escapeAppleScriptInteger(placeholder.start)}, ${escapeAppleScriptInteger(latex.length)})
+return "range-selected"
 `,
   );
 }
@@ -368,22 +414,30 @@ return "equation-insert"
 
 function guiAutomationMessage(error) {
   const message = error instanceof Error ? error.message : String(error);
-  if (/not authorized to send apple events|apple events.*not permitted|-1743|system events/i.test(message)) {
+  if (/not authorized to send apple events|apple events.*not permitted|Refusing TCCAccessRequestIndirect|-1743/i.test(message)) {
     return APPLESCRIPT_RUNNER
-      ? "已检测到 PowerPoint，但 helper 缺少 macOS 自动化权限。请在“系统设置 > 隐私与安全性 > 自动化”中允许 SlideSCICompanion 控制 System Events；如果列表中也出现 Microsoft PowerPoint，请一并打开，然后重新打开 PowerPoint。"
+      ? "已检测到 PowerPoint，但 helper 缺少 macOS 自动化权限。请在“系统设置 > 隐私与安全性 > 自动化”中允许 SlideSCI Companion.app 控制 System Events；如果列表中也出现 Microsoft PowerPoint，请一并打开，然后重新打开 PowerPoint。"
       : "已检测到 PowerPoint，但 helper 缺少 macOS 自动化权限。请在“系统设置 > 隐私与安全性 > 自动化”中允许终端或 Node 控制 System Events。";
+  }
+  if (/-10827/.test(message)) {
+    return APPLESCRIPT_RUNNER
+      ? "已检测到 PowerPoint，但 companion 无法建立本地辅助功能会话。请确认已在“系统设置 > 隐私与安全性 > 辅助功能”中允许 SlideSCI Companion.app 控制电脑，并在授权后完全退出再重新打开 PowerPoint。"
+      : "已检测到 PowerPoint，但本地辅助功能会话不可用。请确认终端或 Node 拥有辅助功能权限。";
   }
   if (/辅助功能|accessibility|ui elements enabled|AXErrorAPIDisabled/i.test(message)) {
     return APPLESCRIPT_RUNNER
-      ? "已检测到 PowerPoint，但 helper 缺少 macOS 辅助功能权限。请在“系统设置 > 隐私与安全性 > 辅助功能”中允许 SlideSCICompanion 控制电脑，然后重新打开 PowerPoint。"
+      ? "已检测到 PowerPoint，但 helper 缺少 macOS 辅助功能权限。请在“系统设置 > 隐私与安全性 > 辅助功能”中允许 SlideSCI Companion.app 控制电脑，然后重新打开 PowerPoint。"
       : "已检测到 PowerPoint，但 helper 缺少 macOS 辅助功能权限。请在“系统设置 > 隐私与安全性 > 辅助功能”中允许终端或 Node 控制电脑。";
   }
   return APPLESCRIPT_RUNNER
-    ? `已检测到 PowerPoint，但界面自动化不可用：${message}。请确认已在“自动化”中允许 SlideSCICompanion 控制 System Events，并在“辅助功能”中允许其控制电脑，同时保持 PowerPoint 窗口处于前台。`
+    ? `已检测到 PowerPoint，但界面自动化不可用：${message}。请确认已在“辅助功能”中允许 SlideSCI Companion.app 控制电脑，同时保持 PowerPoint 窗口处于前台。`
     : `已检测到 PowerPoint，但界面自动化不可用：${message}。请确认已在“自动化”中允许终端或 Node 控制 System Events，并保持 PowerPoint 窗口处于前台。`;
 }
 
 async function isPowerPointRunning() {
+  if (APPLESCRIPT_RUNNER) {
+    return isPowerPointRunningViaApplicationQuery();
+  }
   const script = `
 set processName to ${appleScriptString(POWERPOINT_PROCESS_NAME)}
 tell application "System Events" to return exists process processName
@@ -399,14 +453,15 @@ async function probeGuiAutomation() {
   try {
     const result = await runOsaScript("probe", buildGuiAutomationProbeScript());
     if (result === "ok") {
-      return { available: true, accessibilityGranted: true, message: "本地公式 helper 已运行，PowerPoint 界面自动化可用。" };
+      return { available: true, accessibilityGranted: true, powerpointRunning: true, message: "本地公式 helper 已运行，PowerPoint 界面自动化可用。" };
     }
     if (result === "ui-disabled") {
       return {
         available: false,
         accessibilityGranted: false,
+        powerpointRunning: true,
         message: APPLESCRIPT_RUNNER
-          ? "已检测到 PowerPoint，但 helper 缺少 macOS 辅助功能权限。请在“系统设置 > 隐私与安全性 > 辅助功能”中允许 SlideSCICompanion 控制电脑，然后重新打开 PowerPoint。"
+          ? "已检测到 PowerPoint，但 helper 缺少 macOS 辅助功能权限。请在“系统设置 > 隐私与安全性 > 辅助功能”中允许 SlideSCI Companion.app 控制电脑，然后重新打开 PowerPoint。"
           : "已检测到 PowerPoint，但 helper 缺少 macOS 辅助功能权限。请在“系统设置 > 隐私与安全性 > 辅助功能”中允许终端或 Node 控制电脑。",
       };
     }
@@ -414,18 +469,21 @@ async function probeGuiAutomation() {
       return {
         available: false,
         accessibilityGranted: true,
+        powerpointRunning: false,
         message: "本地公式 helper 已运行，但未检测到 Microsoft PowerPoint。请先打开 PowerPoint。",
       };
     }
     return {
       available: false,
       accessibilityGranted: true,
+      powerpointRunning: true,
       message: `已检测到 PowerPoint，但 helper 状态未知：${result}`,
     };
   } catch (error) {
     return {
       available: false,
       accessibilityGranted: false,
+      powerpointRunning: undefined,
       message: guiAutomationMessage(error),
     };
   }
@@ -454,8 +512,10 @@ async function probeEquationScriptSyntax() {
 }
 
 async function health() {
-  const powerpointRunning = await isPowerPointRunning();
   const guiAutomation = await probeGuiAutomation();
+  const powerpointRunning = typeof guiAutomation.powerpointRunning === "boolean"
+    ? guiAutomation.powerpointRunning
+    : await isPowerPointRunning();
   const syntaxCheck = await probeEquationScriptSyntax();
   const nativeEquationAvailable = guiAutomation.available && syntaxCheck.ok !== false;
   const message = !powerpointRunning

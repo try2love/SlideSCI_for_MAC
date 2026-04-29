@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Foundation
 
 struct CompanionConfig {
@@ -17,6 +18,7 @@ struct CompanionConfig {
   var powerpointBundleIdentifier: String
   var logPrefix: String
   var appleScriptFile: String?
+  var runnerQueueDir: String
 }
 
 enum ArgKey: String {
@@ -35,6 +37,8 @@ enum ArgKey: String {
   case powerpointBundleIdentifier = "--powerpoint-bundle-id"
   case logPrefix = "--log-prefix"
   case runAppleScriptFile = "--run-applescript-file"
+  case requestAccessibilityPermission = "--request-accessibility-permission"
+  case equationShortcut = "--equation-shortcut"
 }
 
 func parseArguments() -> CompanionConfig {
@@ -65,8 +69,21 @@ func parseArguments() -> CompanionConfig {
     shutdownGracePeriod: TimeInterval(values[ArgKey.shutdownGracePeriod.rawValue] ?? "5") ?? 5,
     powerpointBundleIdentifier: values[ArgKey.powerpointBundleIdentifier.rawValue] ?? "com.microsoft.Powerpoint",
     logPrefix: values[ArgKey.logPrefix.rawValue] ?? "[SlideSCI companion]",
-    appleScriptFile: values[ArgKey.runAppleScriptFile.rawValue]
+    appleScriptFile: values[ArgKey.runAppleScriptFile.rawValue],
+    runnerQueueDir: "\(NSHomeDirectory())/Library/Application Support/SlideSCI/runner"
   )
+}
+
+func argumentValue(for key: ArgKey) -> String? {
+  guard let index = CommandLine.arguments.firstIndex(of: key.rawValue),
+        CommandLine.arguments.indices.contains(index + 1) else {
+    return nil
+  }
+  return CommandLine.arguments[index + 1]
+}
+
+func hasFlag(_ key: ArgKey) -> Bool {
+  CommandLine.arguments.contains(key.rawValue)
 }
 
 final class ManagedProcess {
@@ -162,22 +179,122 @@ final class ManagedProcess {
   }
 }
 
+struct AppleScriptRunnerRequest: Codable {
+  let id: String
+  let scriptPath: String
+}
+
+struct AppleScriptRunnerResponse: Codable {
+  let ok: Bool
+  let stdout: String
+  let stderr: String
+}
+
+func executeAppleScriptFile(path: String) -> (ok: Bool, output: String) {
+  do {
+    let source = try String(contentsOfFile: path, encoding: .utf8)
+    guard let script = NSAppleScript(source: source) else {
+      return (false, "无法创建 NSAppleScript 实例。")
+    }
+
+    var errorInfo: NSDictionary?
+    let result = script.executeAndReturnError(&errorInfo)
+    if let errorInfo {
+      let message = errorInfo[NSAppleScript.errorMessage] as? String ?? errorInfo.description
+      let number = errorInfo[NSAppleScript.errorNumber] as? Int ?? 1
+      return (false, "\(message) (\(number))")
+    }
+
+    if let stringValue = result.stringValue, !stringValue.isEmpty {
+      return (true, stringValue)
+    }
+    if result.descriptorType != typeNull {
+      return (true, result.description)
+    }
+    return (true, "")
+  } catch {
+    return (false, error.localizedDescription)
+  }
+}
+
+final class AppleScriptRunnerQueue {
+  private let queueURL: URL
+  private let encoder = JSONEncoder()
+  private let decoder = JSONDecoder()
+  private var processingIds = Set<String>()
+
+  init(queueDir: String) {
+    self.queueURL = URL(fileURLWithPath: queueDir)
+    try? FileManager.default.createDirectory(at: queueURL, withIntermediateDirectories: true)
+  }
+
+  func processPendingRequests() {
+    try? FileManager.default.createDirectory(at: queueURL, withIntermediateDirectories: true)
+    guard let files = try? FileManager.default.contentsOfDirectory(
+      at: queueURL,
+      includingPropertiesForKeys: nil,
+      options: [.skipsHiddenFiles]
+    ) else {
+      return
+    }
+
+    for requestURL in files where requestURL.lastPathComponent.hasSuffix(".request.json") {
+      guard let request = readRequest(at: requestURL), !processingIds.contains(request.id) else {
+        continue
+      }
+      processingIds.insert(request.id)
+      handle(request: request, requestURL: requestURL)
+      processingIds.remove(request.id)
+    }
+  }
+
+  private func readRequest(at url: URL) -> AppleScriptRunnerRequest? {
+    guard let data = try? Data(contentsOf: url) else {
+      return nil
+    }
+    return try? decoder.decode(AppleScriptRunnerRequest.self, from: data)
+  }
+
+  private func handle(request: AppleScriptRunnerRequest, requestURL: URL) {
+    let result = executeAppleScriptFile(path: request.scriptPath)
+    let response = AppleScriptRunnerResponse(
+      ok: result.ok,
+      stdout: result.ok ? result.output : "",
+      stderr: result.ok ? "" : result.output
+    )
+    let responseURL = queueURL.appendingPathComponent("\(request.id).response.json")
+    if let data = try? encoder.encode(response) {
+      try? data.write(to: responseURL, options: [.atomic])
+    }
+    try? FileManager.default.removeItem(at: requestURL)
+  }
+}
+
 final class CompanionSupervisor {
   private let config: CompanionConfig
   private let helperService: ManagedProcess
   private let webService: ManagedProcess
+  private let appleScriptRunnerQueue: AppleScriptRunnerQueue
   private var helperStopDeadline: Date?
 
   init(config: CompanionConfig) {
     self.config = config
+    let accessibilityOptions = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+    if !AXIsProcessTrustedWithOptions(accessibilityOptions) {
+      print("\(config.logPrefix) 已请求 macOS 辅助功能权限；授权后请完全退出并重新打开 PowerPoint。")
+    }
 
     let helperExecutable = URL(fileURLWithPath: config.helperCommand)
+    self.appleScriptRunnerQueue = AppleScriptRunnerQueue(queueDir: config.runnerQueueDir)
     self.helperService = ManagedProcess(
       name: "helper",
       executableURL: helperExecutable,
       arguments: Self.buildProcessArguments(command: config.helperCommand, script: config.helperScript, extraArguments: []),
       logPrefix: config.logPrefix,
-      environment: ["SLIDESCI_APPLESCRIPT_RUNNER": CommandLine.arguments[0]],
+      environment: [
+        "SLIDESCI_APPLESCRIPT_RUNNER": CommandLine.arguments[0],
+        "SLIDESCI_APPLESCRIPT_RUNNER_QUEUE": config.runnerQueueDir,
+      ],
       healthProbe: { Self.probeHealth(url: URL(string: "http://127.0.0.1:\(config.helperPort)/health")) }
     )
 
@@ -206,6 +323,7 @@ final class CompanionSupervisor {
   }
 
   func tick() {
+    appleScriptRunnerQueue.processPendingRequests()
     ensureWebServiceRunning()
     if isPowerPointRunning() {
       helperStopDeadline = nil
@@ -232,6 +350,10 @@ final class CompanionSupervisor {
   func shutdown() {
     helperService.stop(force: true)
     webService.stop(force: true)
+  }
+
+  func processRunnerRequests() {
+    appleScriptRunnerQueue.processPendingRequests()
   }
 
   private func ensureWebServiceRunning() {
@@ -330,30 +452,153 @@ final class CompanionSupervisor {
 }
 
 func runAppleScriptFile(path: String) -> Int32 {
-  do {
-    let source = try String(contentsOfFile: path, encoding: .utf8)
-    guard let script = NSAppleScript(source: source) else {
-      FileHandle.standardError.write(Data("无法创建 NSAppleScript 实例。\n".utf8))
-      return 1
-    }
-
-    var errorInfo: NSDictionary?
-    let result = script.executeAndReturnError(&errorInfo)
-    if let errorInfo {
-      let message = errorInfo[NSAppleScript.errorMessage] as? String ?? errorInfo.description
-      let number = errorInfo[NSAppleScript.errorNumber] as? Int ?? 1
-      FileHandle.standardError.write(Data("\(message) (\(number))\n".utf8))
-      return 1
-    }
-
-    if let stringValue = result.stringValue, !stringValue.isEmpty {
-      print(stringValue)
-    } else if result.descriptorType != typeNull {
-      print(result.description)
+  let result = executeAppleScriptFile(path: path)
+  if result.ok {
+    if !result.output.isEmpty {
+      print(result.output)
     }
     return 0
+  } else {
+    FileHandle.standardError.write(Data("\(result.output)\n".utf8))
+    return 1
+  }
+}
+
+enum NativeEquationAutomationError: LocalizedError {
+  case accessibilityPermissionMissing
+  case powerpointNotRunning
+  case focusedElementUnavailable
+  case selectedTextRangeUnavailable
+  case invalidPayload(String)
+  case clipboardWriteFailed
+  case eventDispatchFailed
+  case accessibilityApiFailed(String)
+
+  var errorDescription: String? {
+    switch self {
+    case .accessibilityPermissionMissing:
+      return "macOS 未授予 SlideSCICompanion 辅助功能权限，无法驱动 PowerPoint 界面。"
+    case .powerpointNotRunning:
+      return "未检测到 Microsoft PowerPoint。"
+    case .focusedElementUnavailable:
+      return "无法进入文本编辑状态。请先选中文本框，再重试。"
+    case .selectedTextRangeUnavailable:
+      return "当前焦点元素不支持文本范围选择。请先进入文本框编辑状态，再重试。"
+    case .invalidPayload(let message):
+      return message
+    case .clipboardWriteFailed:
+      return "无法写入剪贴板内容。"
+    case .eventDispatchFailed:
+      return "无法发送键盘事件。"
+    case .accessibilityApiFailed(let message):
+      return message
+    }
+  }
+}
+
+func runningPowerPoint(bundleIdentifier: String) -> NSRunningApplication? {
+  NSRunningApplication
+    .runningApplications(withBundleIdentifier: bundleIdentifier)
+    .first(where: { !$0.isTerminated })
+}
+
+func createKeyboardEvent(keyCode: CGKeyCode, keyDown: Bool, flags: CGEventFlags) throws -> CGEvent {
+  guard let source = CGEventSource(stateID: .hidSystemState),
+        let event = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: keyDown) else {
+    throw NativeEquationAutomationError.eventDispatchFailed
+  }
+  event.flags = flags
+  return event
+}
+
+func sendKeyPress(keyCode: CGKeyCode, flags: CGEventFlags = []) throws {
+  let keyDownEvent = try createKeyboardEvent(keyCode: keyCode, keyDown: true, flags: flags)
+  let keyUpEvent = try createKeyboardEvent(keyCode: keyCode, keyDown: false, flags: flags)
+  keyDownEvent.post(tap: .cghidEventTap)
+  keyUpEvent.post(tap: .cghidEventTap)
+}
+
+func copyAttributeValue(_ element: AXUIElement, attribute: String) throws -> CFTypeRef {
+  var value: CFTypeRef?
+  let error = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
+  guard error == .success, let value else {
+    throw NativeEquationAutomationError.accessibilityApiFailed("无法读取辅助功能属性 \(attribute)：\(error.rawValue)")
+  }
+  return value
+}
+
+func currentFocusedElement() -> AXUIElement? {
+  let systemWide = AXUIElementCreateSystemWide()
+  var value: CFTypeRef?
+  guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &value) == .success,
+        let value else {
+    return nil
+  }
+  return (value as! AXUIElement)
+}
+
+func focusedEditableElement(bundleIdentifier: String) throws -> AXUIElement {
+  guard AXIsProcessTrusted() else {
+    throw NativeEquationAutomationError.accessibilityPermissionMissing
+  }
+  guard let app = runningPowerPoint(bundleIdentifier: bundleIdentifier) else {
+    throw NativeEquationAutomationError.powerpointNotRunning
+  }
+
+  app.activate(options: [.activateIgnoringOtherApps])
+  usleep(150_000)
+
+  if let focused = currentFocusedElement() {
+    var rangeValue: CFTypeRef?
+    if AXUIElementCopyAttributeValue(focused, kAXSelectedTextRangeAttribute as CFString, &rangeValue) == .success {
+      return focused
+    }
+  }
+
+  try sendKeyPress(keyCode: 36)
+  usleep(150_000)
+
+  guard let focused = currentFocusedElement() else {
+    throw NativeEquationAutomationError.focusedElementUnavailable
+  }
+  var rangeValue: CFTypeRef?
+  guard AXUIElementCopyAttributeValue(focused, kAXSelectedTextRangeAttribute as CFString, &rangeValue) == .success else {
+    throw NativeEquationAutomationError.selectedTextRangeUnavailable
+  }
+  return focused
+}
+
+func setSelectedTextRange(_ element: AXUIElement, start: Int, length: Int) throws {
+  var range = CFRange(location: start, length: length)
+  guard let rangeValue = AXValueCreate(.cfRange, &range) else {
+    throw NativeEquationAutomationError.accessibilityApiFailed("无法创建文本范围描述。")
+  }
+  let error = AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, rangeValue)
+  guard error == .success else {
+    throw NativeEquationAutomationError.accessibilityApiFailed("无法设置文本范围：\(error.rawValue)")
+  }
+}
+
+func requestAccessibilityPermission() -> Int32 {
+  let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+  let trusted = AXIsProcessTrustedWithOptions(options)
+  print(trusted ? "trusted" : "prompted")
+  return 0
+}
+
+func runEquationShortcut(bundleIdentifier: String) -> Int32 {
+  do {
+    guard let app = runningPowerPoint(bundleIdentifier: bundleIdentifier) else {
+      throw NativeEquationAutomationError.powerpointNotRunning
+    }
+    app.activate(options: [.activateIgnoringOtherApps])
+    usleep(120_000)
+    try sendKeyPress(keyCode: 24, flags: .maskAlternate)
+    usleep(180_000)
+    print("equation-insert")
+    return 0
   } catch {
-    FileHandle.standardError.write(Data("\(error.localizedDescription)\n".utf8))
+    FileHandle.standardError.write(Data("\((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)\n".utf8))
     return 1
   }
 }
@@ -361,6 +606,12 @@ func runAppleScriptFile(path: String) -> Int32 {
 let config = parseArguments()
 if let appleScriptFile = config.appleScriptFile, !appleScriptFile.isEmpty {
   exit(runAppleScriptFile(path: appleScriptFile))
+}
+if hasFlag(.requestAccessibilityPermission) {
+  exit(requestAccessibilityPermission())
+}
+if hasFlag(.equationShortcut) {
+  exit(runEquationShortcut(bundleIdentifier: config.powerpointBundleIdentifier))
 }
 let supervisor = CompanionSupervisor(config: config)
 
@@ -380,5 +631,12 @@ timer.setEventHandler {
   supervisor.tick()
 }
 timer.resume()
+
+let runnerTimer = DispatchSource.makeTimerSource()
+runnerTimer.schedule(deadline: .now(), repeating: 0.05)
+runnerTimer.setEventHandler {
+  supervisor.processRunnerRequests()
+}
+runnerTimer.resume()
 
 RunLoop.main.run()

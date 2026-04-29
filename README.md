@@ -18,10 +18,7 @@ npm run dev
 npm run helper
 ```
 
-helper 监听 `http://127.0.0.1:17926`，负责通过 PowerPoint 自动化创建原生公式文本框。安装版默认通过 `SlideSCICompanion` 执行界面自动化；首次使用公式功能时，通常需要在“系统设置 > 隐私与安全性”中同时完成两项授权：
-
-- `自动化`：允许 `SlideSCICompanion` 控制 `System Events`
-- `辅助功能`：允许 `SlideSCICompanion` 控制电脑
+helper 监听 `http://127.0.0.1:17926`，负责通过 PowerPoint 界面自动化创建原生公式对象。安装版默认通过 `SlideSCI Companion.app` 执行本地 AppleScript；首次使用公式功能时，通常需要在“系统设置 > 隐私与安全性 > 自动化”中允许 `SlideSCI Companion.app` 控制 `System Events`。
 
 否则含公式模块会失败并在状态栏显示原因，不会静默降级成图片。
 
@@ -84,8 +81,8 @@ xattr -dr com.apple.quarantine "/你的解压目录/SlideSCI-for-Mac-vX.Y.Z"
    - 复制 `manifest.xml` 到 PowerPoint 的侧载目录
 8. 首次使用时，如果系统弹出权限提示，请允许：
 
-   - `SlideSCICompanion` 在“自动化”中控制 `System Events`
-   - `SlideSCICompanion` 在“辅助功能”中控制电脑
+   - `SlideSCI Companion.app` 在“自动化”中控制 `System Events`
+   - 如果系统同时提示辅助功能权限，也允许 `SlideSCI Companion.app` 控制电脑
 9. 安装完成后，重新打开 PowerPoint
 10. 在 PowerPoint 的 **“开始”** 选项卡中找到 **SlideSCI** 分组里的 **“打开 SlideSCI”** 按钮
 11. 如果没有直接显示，可以先打开 **“加载项”**，再选择 **SlideSCI**
